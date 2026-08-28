@@ -80,6 +80,11 @@ export type BacktestTrade = {
   side: 'LONG' | 'SHORT';
   entryDate: string;
   exitDate: string;
+  entryReason: 'LOOKBACK_HIGH_BREAKOUT' | 'LOOKBACK_LOW_BREAKDOWN';
+  lookbackBars: number;
+  triggerPrice: number;
+  movingAverage: number;
+  entryAtr: number;
   entry: number;
   exit: number;
   stop: number;
@@ -522,6 +527,11 @@ export function backtest(
     size: number;
     riskAmount: number;
     entryFee: number;
+    entryReason: BacktestTrade['entryReason'];
+    lookbackBars: number;
+    triggerPrice: number;
+    movingAverage: number;
+    entryAtr: number;
   } = null;
   const tradeLog: BacktestTrade[] = [];
   const equity = [cash];
@@ -556,6 +566,11 @@ export function backtest(
       side: position.side,
       entryDate: position.entryDate,
       exitDate,
+      entryReason: position.entryReason,
+      lookbackBars: position.lookbackBars,
+      triggerPrice: position.triggerPrice,
+      movingAverage: position.movingAverage,
+      entryAtr: position.entryAtr,
       entry: position.entry,
       exit,
       stop: position.stop,
@@ -634,6 +649,14 @@ export function backtest(
           size,
           riskAmount,
           entryFee: Math.abs(entry * size) * feeRate,
+          entryReason:
+            side === 'LONG'
+              ? 'LOOKBACK_HIGH_BREAKOUT'
+              : 'LOOKBACK_LOW_BREAKDOWN',
+          lookbackBars: options.lookback,
+          triggerPrice: side === 'LONG' ? previousHigh : previousLow,
+          movingAverage,
+          entryAtr: currentAtr,
         };
       }
     }

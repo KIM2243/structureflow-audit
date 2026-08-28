@@ -5,6 +5,8 @@ import {
   Activity,
   BarChart3,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Database,
   Download,
@@ -37,6 +39,7 @@ import {
   type Analysis,
   type BacktestDirection,
   type BacktestOptions,
+  type BacktestTrade,
   type Candle,
   type Snapshot,
 } from '@/lib/engine';
@@ -228,6 +231,24 @@ function downloadTextFile(filename: string, content: string) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+const formatTradeDate = (value: string) => value.slice(0, 16).replace('T', ' ');
+
+function describeEntryReason(trade: BacktestTrade, market: Market) {
+  const direction = trade.side === 'LONG' ? '상향 돌파' : '하향 이탈';
+  const averageSide = trade.side === 'LONG' ? '위' : '아래';
+  return `직전 ${trade.lookbackBars}봉 기준가 ${formatPrice(trade.triggerPrice, market)} ${direction} + 20봉 평균선 ${formatPrice(trade.movingAverage, market)} ${averageSide}`;
+}
+
+function describeExitReason(trade: BacktestTrade, market: Market) {
+  if (trade.exitReason === 'TARGET') {
+    return `목표가 ${formatPrice(trade.target, market)} 도달`;
+  }
+  if (trade.exitReason === 'STOP') {
+    return `손절가 ${formatPrice(trade.stop, market)} 도달`;
+  }
+  return `백테스트 마지막 봉 종가 ${formatPrice(trade.exit, market)}에서 청산`;
 }
 
 function PriceChart({
@@ -480,6 +501,269 @@ function Equity({ values }: { values: number[] }) {
   );
 }
 
+function BacktestTradeChart({
+  data,
+  trades,
+  selectedTrade,
+  market,
+  onSelect,
+}: {
+  data: Candle[];
+  trades: BacktestTrade[];
+  selectedTrade: BacktestTrade | null;
+  market: Market;
+  onSelect: (tradeId: number) => void;
+}) {
+  if (!selectedTrade) {
+    return (
+      <div className="trade-chart-empty">
+        표시할 거래가 없습니다. 조건을 조정해 백테스트를 다시 실행하세요.
+      </div>
+    );
+  }
+
+  const tradeIndex = trades.findIndex((trade) => trade.id === selectedTrade.id);
+  const entryIndex = Math.max(
+    0,
+    data.findIndex((candle) => candle.date === selectedTrade.entryDate),
+  );
+  const resolvedExitIndex = data.findIndex(
+    (candle) => candle.date === selectedTrade.exitDate,
+  );
+  const exitIndex = Math.max(entryIndex, resolvedExitIndex);
+  const startIndex = Math.max(0, entryIndex - 18);
+  const endIndex = Math.min(data.length - 1, exitIndex + 18);
+  const displayed = data.slice(startIndex, endIndex + 1);
+  const width = 900;
+  const height = 330;
+  const padding = { top: 25, right: 22, bottom: 34, left: 58 };
+  const rawMaximum = Math.max(
+    ...displayed.map((candle) => candle.high),
+    selectedTrade.entry,
+    selectedTrade.exit,
+    selectedTrade.stop,
+    selectedTrade.target,
+  );
+  const rawMinimum = Math.min(
+    ...displayed.map((candle) => candle.low),
+    selectedTrade.entry,
+    selectedTrade.exit,
+    selectedTrade.stop,
+    selectedTrade.target,
+  );
+  const pricePadding = Math.max((rawMaximum - rawMinimum) * 0.1, 0.0001);
+  const maximum = rawMaximum + pricePadding;
+  const minimum = rawMinimum - pricePadding;
+  const x = (absoluteIndex: number) =>
+    padding.left +
+    ((absoluteIndex - startIndex) / Math.max(endIndex - startIndex, 1)) *
+      (width - padding.left - padding.right);
+  const y = (value: number) =>
+    padding.top +
+    ((maximum - value) / Math.max(maximum - minimum, 0.000001)) *
+      (height - padding.top - padding.bottom);
+  const candleWidth = Math.max(
+    1.5,
+    Math.min(
+      8,
+      ((width - padding.left - padding.right) / displayed.length) * 0.6,
+    ),
+  );
+  const entryX = x(entryIndex);
+  const exitX = x(exitIndex);
+  const entryY = y(selectedTrade.entry);
+  const exitY = y(selectedTrade.exit);
+  const previousTrade = tradeIndex > 0 ? trades[tradeIndex - 1] : null;
+  const nextTrade =
+    tradeIndex >= 0 && tradeIndex < trades.length - 1
+      ? trades[tradeIndex + 1]
+      : null;
+
+  return (
+    <div className="trade-chart-shell">
+      <div className="trade-chart-toolbar">
+        <div className="trade-navigator">
+          <button
+            type="button"
+            disabled={!previousTrade}
+            onClick={() => previousTrade && onSelect(previousTrade.id)}
+            aria-label="이전 거래"
+          >
+            <ChevronLeft size={14} /> 이전
+          </button>
+          <strong>
+            거래 #{selectedTrade.id} · {selectedTrade.side}
+          </strong>
+          <button
+            type="button"
+            disabled={!nextTrade}
+            onClick={() => nextTrade && onSelect(nextTrade.id)}
+            aria-label="다음 거래"
+          >
+            다음 <ChevronRight size={14} />
+          </button>
+        </div>
+        <div className="trade-chart-legend">
+          <span className="entry-key">진입</span>
+          <span className="exit-key">청산</span>
+          <span className="target-key">목표가</span>
+          <span className="stop-key">손절가</span>
+        </div>
+      </div>
+      <div className="trade-chart-canvas">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          aria-label={`거래 ${selectedTrade.id} 진입 및 청산 가격 차트`}
+        >
+          {[0, 1, 2, 3, 4].map((gridIndex) => {
+            const price = maximum - ((maximum - minimum) * gridIndex) / 4;
+            const gridY = y(price);
+            return (
+              <g key={gridIndex}>
+                <line
+                  x1={padding.left}
+                  x2={width - padding.right}
+                  y1={gridY}
+                  y2={gridY}
+                  className="gridline"
+                />
+                <text
+                  x={padding.left - 7}
+                  y={gridY + 3}
+                  textAnchor="end"
+                  className="trade-axis-label"
+                >
+                  {formatPrice(price, market)}
+                </text>
+              </g>
+            );
+          })}
+          <rect
+            x={Math.min(entryX, exitX)}
+            y={Math.min(y(selectedTrade.target), y(selectedTrade.stop))}
+            width={Math.max(2, Math.abs(exitX - entryX))}
+            height={Math.abs(y(selectedTrade.stop) - y(selectedTrade.target))}
+            className="trade-risk-zone"
+          />
+          <line
+            x1={entryX}
+            x2={exitX}
+            y1={y(selectedTrade.target)}
+            y2={y(selectedTrade.target)}
+            className="trade-target-line"
+          />
+          <line
+            x1={entryX}
+            x2={exitX}
+            y1={y(selectedTrade.stop)}
+            y2={y(selectedTrade.stop)}
+            className="trade-stop-line"
+          />
+          {displayed.map((candle, index) => {
+            const absoluteIndex = startIndex + index;
+            const candleX = x(absoluteIndex);
+            const upward = candle.close >= candle.open;
+            return (
+              <g key={`${candle.date}-${absoluteIndex}`}>
+                <line
+                  x1={candleX}
+                  x2={candleX}
+                  y1={y(candle.high)}
+                  y2={y(candle.low)}
+                  className={upward ? 'wick up' : 'wick down'}
+                />
+                <rect
+                  x={candleX - candleWidth / 2}
+                  y={Math.min(y(candle.open), y(candle.close))}
+                  width={candleWidth}
+                  height={Math.max(
+                    1,
+                    Math.abs(y(candle.open) - y(candle.close)),
+                  )}
+                  className={upward ? 'candle up' : 'candle down'}
+                />
+              </g>
+            );
+          })}
+          <line
+            x1={entryX}
+            x2={entryX}
+            y1={entryY}
+            y2={height - padding.bottom}
+            className="trade-marker-guide entry"
+          />
+          <g
+            className={`trade-marker entry ${selectedTrade.side.toLowerCase()}`}
+          >
+            <circle cx={entryX} cy={entryY} r="7" />
+            <text x={entryX} y={entryY - 13} textAnchor="middle">
+              진입 {formatPrice(selectedTrade.entry, market)}
+            </text>
+            <title>{describeEntryReason(selectedTrade, market)}</title>
+          </g>
+          <line
+            x1={exitX}
+            x2={exitX}
+            y1={exitY}
+            y2={height - padding.bottom}
+            className="trade-marker-guide exit"
+          />
+          <g
+            className={`trade-marker exit ${selectedTrade.result.toLowerCase()}`}
+          >
+            <circle cx={exitX} cy={exitY} r="7" />
+            <text x={exitX} y={exitY + 21} textAnchor="middle">
+              청산 {formatPrice(selectedTrade.exit, market)}
+            </text>
+            <title>{describeExitReason(selectedTrade, market)}</title>
+          </g>
+          <text x={padding.left} y={height - 10} className="trade-date-label">
+            {formatTradeDate(displayed[0].date)}
+          </text>
+          <text
+            x={width - padding.right}
+            y={height - 10}
+            textAnchor="end"
+            className="trade-date-label"
+          >
+            {formatTradeDate(displayed.at(-1)!.date)}
+          </text>
+        </svg>
+      </div>
+      <div className="trade-reason-grid">
+        <article className="trade-reason-card entry">
+          <header>
+            <span>진입 근거</span>
+            <b>{formatTradeDate(selectedTrade.entryDate)}</b>
+          </header>
+          <p>{describeEntryReason(selectedTrade, market)}</p>
+          <div>
+            <span>진입 {formatPrice(selectedTrade.entry, market)}</span>
+            <span>ATR {formatPrice(selectedTrade.entryAtr, market)}</span>
+          </div>
+        </article>
+        <article className="trade-reason-card exit">
+          <header>
+            <span>청산 근거</span>
+            <b>{formatTradeDate(selectedTrade.exitDate)}</b>
+          </header>
+          <p>{describeExitReason(selectedTrade, market)}</p>
+          <div>
+            <span className={selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>
+              손익 {formatMoney(selectedTrade.pnl, market)}
+            </span>
+            <span
+              className={selectedTrade.rMultiple >= 0 ? 'positive' : 'negative'}
+            >
+              {selectedTrade.rMultiple.toFixed(2)}R
+            </span>
+          </div>
+        </article>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [market, setMarket] = useState<Market>('US');
   const [symbol, setSymbol] = useState('ONDS');
@@ -505,6 +789,7 @@ export default function Home() {
   const [backtestTimeframe, setBacktestTimeframe] = useState<Timeframe>('15m');
   const [appliedBacktestTimeframe, setAppliedBacktestTimeframe] =
     useState<Timeframe>('15m');
+  const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [appliedBacktest, setAppliedBacktest] = useState<BacktestOptions>(
     () => ({
       minRR: 2,
@@ -540,6 +825,10 @@ export default function Home() {
     () => backtest(backtestData, appliedBacktest),
     [appliedBacktest, backtestData],
   );
+  const selectedTrade =
+    result.tradeLog.find((trade) => trade.id === selectedTradeId) ??
+    result.tradeLog.at(-1) ??
+    null;
   const maxLookback = Math.max(8, Math.min(50, draftBacktestData.length - 2));
   const canRunBacktest = draftBacktestData.length >= Math.max(lookback, 20) + 2;
   const last = chartData.at(-1)?.close ?? data.at(-1)!.close;
@@ -636,6 +925,7 @@ export default function Home() {
 
   const runBacktest = () => {
     if (!canRunBacktest) return;
+    setSelectedTradeId(null);
     setAppliedBacktest({
       minRR: rewardRisk,
       lookback,
@@ -661,6 +951,11 @@ export default function Home() {
       'id',
       'side',
       'entry_date',
+      'entry_reason',
+      'lookback_bars',
+      'trigger_price',
+      'moving_average',
+      'entry_atr',
       'exit_date',
       'entry',
       'exit',
@@ -676,6 +971,11 @@ export default function Home() {
       trade.id,
       trade.side,
       trade.entryDate,
+      trade.entryReason,
+      trade.lookbackBars,
+      trade.triggerPrice,
+      trade.movingAverage,
+      trade.entryAtr,
       trade.exitDate,
       trade.entry,
       trade.exit,
@@ -1260,6 +1560,23 @@ export default function Home() {
                 </div>
               ))}
             </div>
+            <div className="panel trade-chart-panel" id="backtest-trade-chart">
+              <div className="panel-title">
+                <span>진입·청산 검증 차트</span>
+                <small>
+                  {selectedTrade
+                    ? `거래 #${selectedTrade.id} · ${timeframeLabels[appliedBacktestTimeframe]}`
+                    : '체결 거래 없음'}
+                </small>
+              </div>
+              <BacktestTradeChart
+                data={backtestData}
+                trades={result.tradeLog}
+                selectedTrade={selectedTrade}
+                market={market}
+                onSelect={setSelectedTradeId}
+              />
+            </div>
             <div className="panel equity">
               <div className="panel-title">
                 <span>자산 곡선</span>
@@ -1302,10 +1619,11 @@ export default function Home() {
                         <th>#</th>
                         <th>방향</th>
                         <th>진입</th>
+                        <th>진입 근거</th>
                         <th>청산</th>
                         <th>손익</th>
                         <th>R</th>
-                        <th>사유</th>
+                        <th>청산 근거</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1313,7 +1631,28 @@ export default function Home() {
                         .slice(-12)
                         .reverse()
                         .map((trade) => (
-                          <tr key={trade.id}>
+                          <tr
+                            key={trade.id}
+                            className={
+                              selectedTrade?.id === trade.id ? 'selected' : ''
+                            }
+                            tabIndex={0}
+                            onClick={() => {
+                              setSelectedTradeId(trade.id);
+                              document
+                                .getElementById('backtest-trade-chart')
+                                ?.scrollIntoView({
+                                  behavior: 'smooth',
+                                  block: 'center',
+                                });
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setSelectedTradeId(trade.id);
+                              }
+                            }}
+                          >
                             <td>{trade.id}</td>
                             <td>
                               <span
@@ -1328,15 +1667,14 @@ export default function Home() {
                             </td>
                             <td>
                               <b>{formatPrice(trade.entry, market)}</b>
-                              <small>
-                                {trade.entryDate.slice(0, 16).replace('T', ' ')}
-                              </small>
+                              <small>{formatTradeDate(trade.entryDate)}</small>
+                            </td>
+                            <td className="trade-reason-cell">
+                              {describeEntryReason(trade, market)}
                             </td>
                             <td>
                               <b>{formatPrice(trade.exit, market)}</b>
-                              <small>
-                                {trade.exitDate.slice(0, 16).replace('T', ' ')}
-                              </small>
+                              <small>{formatTradeDate(trade.exitDate)}</small>
                             </td>
                             <td
                               className={
@@ -1352,7 +1690,9 @@ export default function Home() {
                             >
                               {trade.rMultiple.toFixed(2)}R
                             </td>
-                            <td>{trade.exitReason}</td>
+                            <td className="trade-reason-cell">
+                              {describeExitReason(trade, market)}
+                            </td>
                           </tr>
                         ))}
                     </tbody>
