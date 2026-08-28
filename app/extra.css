@@ -1,0 +1,2 @@
+.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+button:disabled{opacity:.55;cursor:wait}.vp-detail{margin:0 12px 12px;padding:12px;border:1px solid #37345d;background:#111326;border-radius:8px;color:#c9c2ff;font-size:11px}.vp-detail p{margin:6px 0 0;color:#7f8b9e;font-size:10px}.controlbar>.primary{padding:10px 12px;white-space:nowrap}.freshness{max-width:430px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
