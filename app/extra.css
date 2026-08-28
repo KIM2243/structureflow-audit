@@ -1,2 +1,327 @@
-.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-button:disabled{opacity:.55;cursor:wait}.vp-detail{margin:0 12px 12px;padding:12px;border:1px solid #37345d;background:#111326;border-radius:8px;color:#c9c2ff;font-size:11px}.vp-detail p{margin:6px 0 0;color:#7f8b9e;font-size:10px}.controlbar>.primary{padding:10px 12px;white-space:nowrap}.freshness{max-width:430px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.vp-detail {
+  margin: 0 12px 12px;
+  padding: 12px;
+  border: 1px solid #37345d;
+  background: #111326;
+  border-radius: 8px;
+  color: #c9c2ff;
+  font-size: 11px;
+}
+.vp-detail p {
+  margin: 6px 0 0;
+  color: #7f8b9e;
+  font-size: 10px;
+}
+.controlbar > .primary {
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+.freshness {
+  max-width: 430px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.structure-zone {
+  stroke-width: 1;
+}
+.structure-zone.bullish-ob {
+  fill: #19b98224;
+  stroke: #2bd39d80;
+}
+.structure-zone.bearish-ob {
+  fill: #e85d6d20;
+  stroke: #f0677480;
+}
+.structure-zone.bullish-fvg {
+  fill: #5c8df51d;
+  stroke: #6f9fff70;
+  stroke-dasharray: 4 3;
+}
+.structure-zone.bearish-fvg {
+  fill: #b16df01a;
+  stroke: #bb7cff70;
+  stroke-dasharray: 4 3;
+}
+.zone-label {
+  fill: #a9b6c7;
+  font-size: 8px;
+  font-weight: 700;
+}
+.profile-bar {
+  fill: #7868ee;
+  opacity: 0.25;
+}
+.liquidity-level {
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.liquidity-level.buy-side {
+  stroke: #f5b953;
+}
+.liquidity-level.sell-side {
+  stroke: #4ab9d8;
+}
+.liquidity-label {
+  fill: #a8b3c1;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.position-card {
+  margin: 10px;
+  background: #0d1719;
+  border: 1px solid #255b4b;
+  border-radius: 8px;
+  padding: 11px;
+}
+.position-card > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 800;
+}
+.position-card > strong {
+  display: block;
+  font: 800 20px monospace;
+  margin: 8px 0 4px;
+}
+.position-card > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.direction-control {
+  margin: 16px 14px;
+}
+.direction-control > small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-bottom: 8px;
+}
+.direction-control .segmented {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.direction-control .segmented button {
+  font-size: 9px;
+  cursor: pointer;
+}
+.secondary-action {
+  width: calc(100% - 28px);
+  margin: 0 14px 8px;
+  border: 1px solid var(--line);
+  background: #151d28;
+  color: #c5cfdb;
+  border-radius: 7px;
+  padding: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.result-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.result-actions button {
+  border: 1px solid var(--line);
+  background: #141c27;
+  color: #d8e0ea;
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+.trades-panel {
+  margin-top: 10px;
+  overflow: hidden;
+}
+.trades-scroll {
+  overflow: auto;
+  max-height: 390px;
+}
+.trades-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.trades-panel th {
+  position: sticky;
+  top: 0;
+  background: #111823;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: left;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+  z-index: 1;
+}
+.trades-panel td {
+  padding: 9px 11px;
+  border-bottom: 1px solid #1a2330;
+  color: #c5cfdb;
+}
+.trades-panel td b {
+  display: block;
+  color: #eef3f8;
+  font: 700 10px monospace;
+}
+.trades-panel td small {
+  display: block;
+  color: #667487;
+  font-size: 8px;
+  margin-top: 3px;
+}
+.trade-long,
+.trade-short {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 900;
+}
+.trade-long {
+  background: #163c32;
+  color: var(--green);
+}
+.trade-short {
+  background: #46212a;
+  color: var(--red);
+}
+.empty-trades {
+  padding: 30px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-dialog {
+  background: #0f151e !important;
+  color: #e8edf5 !important;
+  border: 1px solid #2a3545 !important;
+  box-shadow: 0 24px 80px #000a !important;
+  max-width: 480px !important;
+  padding: 20px !important;
+}
+.settings-dialog [data-slot='dialog-title'] {
+  font-size: 17px;
+  font-weight: 800;
+}
+.settings-dialog [data-slot='dialog-description'] {
+  color: #8794a6;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.settings-dialog [data-slot='dialog-close'] {
+  color: #aab5c3;
+}
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.settings-grid label {
+  display: block;
+  color: #98a5b6;
+  font-size: 10px;
+}
+.settings-grid label span {
+  display: block;
+  margin-bottom: 6px;
+}
+.settings-grid input {
+  width: 100%;
+  border: 1px solid #2a3545;
+  background: #090e15;
+  color: #f1f5f9;
+  border-radius: 7px;
+  padding: 9px 10px;
+  outline: none;
+  font: 700 12px monospace;
+}
+.settings-grid input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px #28d59a20;
+}
+.settings-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #255b4b;
+  background: #0d1919;
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--green);
+}
+.settings-preview strong {
+  font-size: 11px;
+  color: #dffbf1;
+}
+.settings-preview p {
+  margin: 4px 0 0;
+  color: #7f8b9e;
+  font-size: 9px;
+}
+.settings-footer {
+  margin: 0 !important;
+  padding: 14px 0 0 !important;
+  border-top: 1px solid #263141 !important;
+  background: transparent !important;
+}
+.settings-footer .primary {
+  margin-left: auto;
+}
+.reset-settings {
+  border: 0;
+  background: transparent;
+  color: #8b98a8;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .result-head {
+    display: block;
+  }
+  .result-actions {
+    margin-top: 12px;
+    justify-content: space-between;
+  }
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .settings-dialog {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+  }
+  .trades-panel {
+    margin-bottom: 8px;
+  }
+}
