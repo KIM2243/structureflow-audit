@@ -86,6 +86,22 @@ const timeframeSizes: Record<Timeframe, number> = {
   '1D': 26,
 };
 
+const timeframeLabels: Record<Timeframe, string> = {
+  '15m': '15분봉',
+  '1H': '1시간봉',
+  '4H': '4시간봉',
+  '1D': '일봉',
+};
+
+const timeframeButtonLabels: Record<Timeframe, string> = {
+  '15m': '15분',
+  '1H': '1시간',
+  '4H': '4시간',
+  '1D': '일봉',
+};
+
+const backtestTimeframes: Timeframe[] = ['15m', '1H', '4H', '1D'];
+
 const DEFAULT_PREFERENCES: Preferences = {
   capital: 10_000,
   riskPct: 1,
@@ -95,6 +111,19 @@ const DEFAULT_PREFERENCES: Preferences = {
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
+
+function formatLookbackDuration(bars: number, timeframe: Timeframe) {
+  if (timeframe === '1D') return `${bars}거래일`;
+
+  const minutes = bars * timeframeSizes[timeframe] * 15;
+  if (minutes < 60) return `${minutes}분`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes
+    ? `${hours}시간 ${remainingMinutes}분`
+    : `${hours}시간`;
+}
 
 function loadPreferences(): Preferences {
   if (typeof window === 'undefined') return DEFAULT_PREFERENCES;
@@ -435,10 +464,7 @@ function Equity({ values }: { values: number[] }) {
     .map((value, index) => `${index ? 'L' : 'M'}${x(index)} ${y(value)}`)
     .join(' ');
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      aria-label="백테스트 자산 곡선"
-    >
+    <svg viewBox={`0 0 ${width} ${height}`} aria-label="백테스트 자산 곡선">
       <path d={path} fill="none" stroke="#26d69b" strokeWidth="3" />
       {[60, 110, 160, 210].map((value) => (
         <line
@@ -476,6 +502,9 @@ export default function Home() {
   const [lookback, setLookback] = useState(20);
   const [rewardRisk, setRewardRisk] = useState(2);
   const [direction, setDirection] = useState<BacktestDirection>('BOTH');
+  const [backtestTimeframe, setBacktestTimeframe] = useState<Timeframe>('15m');
+  const [appliedBacktestTimeframe, setAppliedBacktestTimeframe] =
+    useState<Timeframe>('15m');
   const [appliedBacktest, setAppliedBacktest] = useState<BacktestOptions>(
     () => ({
       minRR: 2,
@@ -499,10 +528,20 @@ export default function Home() {
   );
   const analysisData = chartData.length >= 20 ? chartData : data;
   const analysis = useMemo(() => analyze(analysisData), [analysisData]);
-  const result = useMemo(
-    () => backtest(data, appliedBacktest),
-    [data, appliedBacktest],
+  const draftBacktestData = useMemo(
+    () => resample(data, timeframeSizes[backtestTimeframe]),
+    [backtestTimeframe, data],
   );
+  const backtestData = useMemo(
+    () => resample(data, timeframeSizes[appliedBacktestTimeframe]),
+    [appliedBacktestTimeframe, data],
+  );
+  const result = useMemo(
+    () => backtest(backtestData, appliedBacktest),
+    [appliedBacktest, backtestData],
+  );
+  const maxLookback = Math.max(8, Math.min(50, draftBacktestData.length - 2));
+  const canRunBacktest = draftBacktestData.length >= Math.max(lookback, 20) + 2;
   const last = chartData.at(-1)?.close ?? data.at(-1)!.close;
   const entryMidpoint = (analysis.entry[0] + analysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - analysis.stop), 0.000001);
@@ -596,6 +635,7 @@ export default function Home() {
   };
 
   const runBacktest = () => {
+    if (!canRunBacktest) return;
     setAppliedBacktest({
       minRR: rewardRisk,
       lookback,
@@ -605,7 +645,15 @@ export default function Home() {
       slippageBps: preferences.slippageBps,
       direction,
     });
+    setAppliedBacktestTimeframe(backtestTimeframe);
     setLastRun(new Date().toLocaleTimeString('ko-KR'));
+  };
+
+  const chooseBacktestTimeframe = (nextTimeframe: Timeframe) => {
+    const availableBars = resample(data, timeframeSizes[nextTimeframe]).length;
+    const nextMaximum = Math.max(8, Math.min(50, availableBars - 2));
+    setBacktestTimeframe(nextTimeframe);
+    setLookback((currentLookback) => clamp(currentLookback, 8, nextMaximum));
   };
 
   const exportTrades = () => {
@@ -647,7 +695,7 @@ export default function Home() {
       )
       .join('\n');
     downloadTextFile(
-      `structureflow-${current.code}-backtest.csv`,
+      `structureflow-${current.code}-${appliedBacktestTimeframe}-backtest.csv`,
       `\uFEFF${csv}`,
     );
   };
@@ -1064,16 +1112,40 @@ export default function Home() {
               <span>백테스트 설정</span>
               <small>마지막 실행 {lastRun}</small>
             </div>
+            <div className="backtest-timeframe-control">
+              <small>백테스트 기준 봉</small>
+              <div className="segmented" aria-label="백테스트 봉 주기">
+                {backtestTimeframes.map((item) => (
+                  <button
+                    type="button"
+                    key={item}
+                    className={backtestTimeframe === item ? 'on' : ''}
+                    aria-pressed={backtestTimeframe === item}
+                    onClick={() => chooseBacktestTimeframe(item)}
+                  >
+                    {timeframeButtonLabels[item]}
+                  </button>
+                ))}
+              </div>
+              <span>
+                원본 15분봉을 {timeframeLabels[backtestTimeframe]}으로 묶어 계산
+                · 사용 가능 {draftBacktestData.length.toLocaleString()}봉
+              </span>
+            </div>
             <label>
               돌파 Lookback
               <input
                 type="range"
                 min="8"
-                max="50"
+                max={maxLookback}
                 value={lookback}
                 onChange={(event) => setLookback(Number(event.target.value))}
               />
-              <span className="range-value">{lookback} bars</span>
+              <span className="range-value">{lookback}봉</span>
+              <span className="lookback-duration">
+                {timeframeLabels[backtestTimeframe]} 기준 ·{' '}
+                {formatLookbackDuration(lookback, backtestTimeframe)} 범위
+              </span>
             </label>
             <label>
               목표 R:R
@@ -1105,7 +1177,7 @@ export default function Home() {
             </div>
             <div className="checks">
               <span>✓ 이전 고가·저가 돌파</span>
-              <span>✓ 20-bar 평균 추세 필터</span>
+              <span>✓ 20봉 이동평균 추세 필터</span>
               <span>✓ ATR 1.5 손절</span>
               <span>
                 ✓ 거래당 자본 {preferences.riskPct.toFixed(1)}% 리스크
@@ -1115,7 +1187,17 @@ export default function Home() {
                 {preferences.slippageBps}bp
               </span>
             </div>
-            <button className="run" onClick={runBacktest}>
+            {!canRunBacktest && (
+              <p className="backtest-data-warning">
+                이 봉 주기로 계산할 데이터가 부족합니다. 더 짧은 봉을 선택해
+                주세요.
+              </p>
+            )}
+            <button
+              className="run"
+              onClick={runBacktest}
+              disabled={!canRunBacktest}
+            >
               <Play size={16} /> 설정으로 백테스트 실행
             </button>
             <button className="secondary-action" onClick={openSettings}>
@@ -1135,8 +1217,14 @@ export default function Home() {
                 <small>CALCULATED BACKTEST</small>
                 <h1>{current.code} · 구조 돌파 전략</h1>
                 <p>
-                  {data.length.toLocaleString()}개 캔들 · 비용 반영 · 미래
-                  데이터 참조 없이 순차 계산
+                  {backtestData.length.toLocaleString()}개{' '}
+                  {timeframeLabels[appliedBacktestTimeframe]} · Lookback{' '}
+                  {appliedBacktest.lookback}봉 (
+                  {formatLookbackDuration(
+                    appliedBacktest.lookback,
+                    appliedBacktestTimeframe,
+                  )}
+                  ) · 비용 반영 · 미래 데이터 참조 없이 순차 계산
                 </p>
               </div>
               <div className="result-actions">

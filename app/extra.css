@@ -110,11 +110,33 @@ button:disabled {
 .direction-control {
   margin: 16px 14px;
 }
+.backtest-timeframe-control {
+  margin: 15px 14px 18px;
+}
+.backtest-timeframe-control > small,
 .direction-control > small {
   display: block;
   color: var(--muted);
   font-size: 10px;
   margin-bottom: 8px;
+}
+.backtest-timeframe-control .segmented {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.backtest-timeframe-control .segmented button {
+  padding-inline: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.backtest-timeframe-control > span {
+  display: block;
+  margin-top: 7px;
+  color: #7f8b9e;
+  font-size: 8px;
+  line-height: 1.5;
 }
 .direction-control .segmented {
   width: 100%;
@@ -138,6 +160,23 @@ button:disabled {
   justify-content: center;
   gap: 7px;
   cursor: pointer;
+}
+.lookback-duration {
+  display: block;
+  margin-top: 5px;
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+}
+.backtest-data-warning {
+  margin: 0 14px 8px;
+  color: var(--amber);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.strategy .run:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .result-actions {
