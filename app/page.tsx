@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -12,15 +12,20 @@ import {
   Download,
   Layers3,
   Loader2,
+  Plus,
   Play,
+  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Target,
+  Trash2,
   TrendingUp,
   UploadCloud,
   WalletCards,
+  Wifi,
+  WifiOff,
   Zap,
 } from 'lucide-react';
 
@@ -64,10 +69,40 @@ type Preferences = {
 
 type MarketResponse = {
   error?: string;
+  name?: string;
   source?: string;
   fetchedAt?: string;
   candles?: Candle[];
 };
+
+type WatchlistEntry = {
+  market: Market;
+  ticker: string;
+};
+
+type LiveQuote = {
+  symbol: string;
+  name: string;
+  exchange?: string;
+  currency?: string;
+  price: number;
+  previousClose: number;
+  change: number;
+  changePct: number;
+  timestamp: string;
+  marketState: string;
+  candle: Candle;
+};
+
+type QuotesResponse = {
+  error?: string;
+  quotes?: LiveQuote[];
+  errors?: Array<{ symbol: string; error: string }>;
+  fetchedAt?: string;
+  refreshAfterSeconds?: number;
+};
+
+type WatchedSymbol = SymbolItem & { market: Market };
 
 const symbols: Record<Market, SymbolItem[]> = {
   US: [
@@ -81,6 +116,12 @@ const symbols: Record<Market, SymbolItem[]> = {
     { code: '035420', feed: '035420.KS', name: 'NAVER', currency: '₩' },
   ],
 };
+
+const DEFAULT_WATCHLIST: WatchlistEntry[] = [
+  { market: 'US', ticker: 'ONDS' },
+  { market: 'US', ticker: 'NVDA' },
+  { market: 'US', ticker: 'TSLA' },
+];
 
 const timeframeSizes: Record<Timeframe, number> = {
   '15m': 1,
@@ -114,6 +155,96 @@ const DEFAULT_PREFERENCES: Preferences = {
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
+
+function normalizeWatchlistEntry(entry: WatchlistEntry): WatchedSymbol | null {
+  const ticker = entry.ticker.trim().toUpperCase();
+  if (entry.market === 'US') {
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) return null;
+    const known = symbols.US.find((item) => item.feed === ticker);
+    return {
+      market: 'US',
+      code: ticker,
+      feed: ticker,
+      name: known?.name || ticker,
+      currency: '$',
+    };
+  }
+
+  const match = ticker.match(/^(\d{6})(?:\.(KS|KQ))?$/);
+  if (!match) return null;
+  const feed = `${match[1]}.${match[2] || 'KS'}`;
+  const known = symbols.KR.find((item) => item.feed === feed);
+  return {
+    market: 'KR',
+    code: match[1],
+    feed,
+    name: known?.name || match[1],
+    currency: '₩',
+  };
+}
+
+function loadWatchlist() {
+  if (typeof window === 'undefined') return DEFAULT_WATCHLIST;
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem('structureflow:watchlist') || '[]',
+    ) as WatchlistEntry[];
+    const valid = saved
+      .slice(0, 3)
+      .filter((entry) => normalizeWatchlistEntry(entry));
+    return valid.length ? valid : DEFAULT_WATCHLIST;
+  } catch {
+    return DEFAULT_WATCHLIST;
+  }
+}
+
+function marketStateLabel(state: string) {
+  if (state === 'REGULAR') return '장중';
+  if (state === 'PRE') return '프리마켓';
+  if (state === 'POST' || state === 'POSTPOST') return '애프터마켓';
+  if (state === 'CLOSED') return '장 종료';
+  return '시세 수신';
+}
+
+function mergeLiveCandle(candles: Candle[], quote: LiveQuote) {
+  if (!candles.length) return candles;
+  const quoteTime = Date.parse(quote.timestamp);
+  const lastTime = Date.parse(candles.at(-1)!.date);
+  if (!Number.isFinite(quoteTime) || !Number.isFinite(lastTime)) return candles;
+
+  const bucketMs = 15 * 60 * 1_000;
+  const quoteBucket = Math.floor(quoteTime / bucketMs) * bucketMs;
+  const lastBucket = Math.floor(lastTime / bucketMs) * bucketMs;
+  if (quoteBucket < lastBucket) return candles;
+
+  const liveHigh = Math.max(quote.price, quote.candle.high);
+  const liveLow = Math.min(quote.price, quote.candle.low);
+  if (quoteBucket === lastBucket) {
+    const next = [...candles];
+    const last = next.at(-1)!;
+    next[next.length - 1] = {
+      ...last,
+      high: Math.max(last.high, liveHigh),
+      low: Math.min(last.low, liveLow),
+      close: quote.price,
+      volume: Math.max(last.volume, quote.candle.volume),
+    };
+    return next;
+  }
+
+  const previousClose = candles.at(-1)!.close;
+  return [
+    ...candles.slice(-1_999),
+    {
+      date: new Date(quoteBucket).toISOString(),
+      open: previousClose,
+      high: Math.max(previousClose, liveHigh),
+      low: Math.min(previousClose, liveLow),
+      close: quote.price,
+      volume: quote.candle.volume,
+    },
+  ];
+}
 
 function formatLookbackDuration(bars: number, timeframe: Timeframe) {
   if (timeframe === '1D') return `${bars}거래일`;
@@ -780,6 +911,17 @@ export default function Home() {
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(loadWatchlist);
+  const [watchlistDraft, setWatchlistDraft] =
+    useState<WatchlistEntry[]>(loadWatchlist);
+  const [watchlistError, setWatchlistError] = useState('');
+  const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
+  const [liveErrors, setLiveErrors] = useState<Record<string, string>>({});
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState('');
+  const [liveError, setLiveError] = useState('');
+  const [loadedFeed, setLoadedFeed] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<Preferences>(loadPreferences);
   const [settingsDraft, setSettingsDraft] =
     useState<Preferences>(loadPreferences);
@@ -803,9 +945,31 @@ export default function Home() {
   );
   const [lastRun, setLastRun] = useState('초기 계산');
   const fileInput = useRef<HTMLInputElement>(null);
+  const liveRequestInFlight = useRef(false);
+  const initialLoadStarted = useRef(false);
 
+  const watchedSymbols = useMemo(
+    () =>
+      watchlist
+        .map(normalizeWatchlistEntry)
+        .filter((item): item is WatchedSymbol => Boolean(item)),
+    [watchlist],
+  );
+  const availableSymbols = useMemo(() => {
+    const byFeed = new Map<string, SymbolItem>();
+    for (const item of symbols[market]) byFeed.set(item.feed, item);
+    for (const item of watchedSymbols) {
+      if (item.market !== market) continue;
+      byFeed.set(item.feed, {
+        ...item,
+        name: liveQuotes[item.feed]?.name || item.name,
+      });
+    }
+    return Array.from(byFeed.values());
+  }, [liveQuotes, market, watchedSymbols]);
   const current =
-    symbols[market].find((item) => item.code === symbol) ?? symbols[market][0];
+    availableSymbols.find((item) => item.code === symbol) ??
+    availableSymbols[0];
   const baseAnalysis = useMemo(() => analyze(data), [data]);
   const chartData = useMemo(
     () => resample(data, timeframeSizes[timeframe]),
@@ -832,15 +996,17 @@ export default function Home() {
   const maxLookback = Math.max(8, Math.min(50, draftBacktestData.length - 2));
   const canRunBacktest = draftBacktestData.length >= Math.max(lookback, 20) + 2;
   const last = chartData.at(-1)?.close ?? data.at(-1)!.close;
+  const activeLiveQuote = liveQuotes[current.feed];
+  const displayedPrice = activeLiveQuote?.price ?? last;
   const entryMidpoint = (analysis.entry[0] + analysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - analysis.stop), 0.000001);
   const riskBudget = preferences.capital * (preferences.riskPct / 100);
   const positionSize = Math.max(0, Math.floor(riskBudget / unitRisk));
   const positionNotional = positionSize * entryMidpoint;
 
-  const loadMarketData = async (item = current) => {
+  const loadMarketData = useCallback(async (item: SymbolItem) => {
     setLoading(true);
-    setStatus('시장 데이터 불러오는 중…');
+    setStatus(`${item.code} 분석 데이터 불러오는 중…`);
     try {
       const response = await fetch(
         `/api/market?symbol=${encodeURIComponent(item.feed)}`,
@@ -854,8 +1020,9 @@ export default function Home() {
         throw new Error('분석 가능한 데이터가 부족합니다.');
       }
       setData(payload.candles);
+      setLoadedFeed(item.feed);
       setStatus(
-        `${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
+        `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
       );
     } catch (error) {
       setStatus(
@@ -864,7 +1031,75 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const refreshLiveQuotes = useCallback(async () => {
+    if (!watchedSymbols.length || liveRequestInFlight.current) return;
+    liveRequestInFlight.current = true;
+    setLiveLoading(true);
+    try {
+      const feeds = watchedSymbols.map((item) => item.feed).join(',');
+      const response = await fetch(
+        `/api/quotes?symbols=${encodeURIComponent(feeds)}`,
+        { cache: 'no-store' },
+      );
+      const payload = (await response.json()) as QuotesResponse;
+      const errors = Object.fromEntries(
+        (payload.errors || []).map((item) => [item.symbol, item.error]),
+      );
+      setLiveErrors(errors);
+      if (!response.ok && !payload.quotes?.length) {
+        throw new Error(payload.error || '실시간 시세를 받지 못했습니다.');
+      }
+
+      const quotes = payload.quotes || [];
+      setLiveQuotes((previous) => ({
+        ...previous,
+        ...Object.fromEntries(quotes.map((quote) => [quote.symbol, quote])),
+      }));
+      setLiveUpdatedAt(payload.fetchedAt || new Date().toISOString());
+      setLiveError('');
+
+      const activeQuote = quotes.find((quote) => quote.symbol === current.feed);
+      if (activeQuote && loadedFeed === current.feed) {
+        setData((candles) => mergeLiveCandle(candles, activeQuote));
+      }
+    } catch (error) {
+      setLiveError(
+        error instanceof Error ? error.message : '실시간 시세 연결 오류',
+      );
+    } finally {
+      setLiveLoading(false);
+      liveRequestInFlight.current = false;
+    }
+  }, [current.feed, loadedFeed, watchedSymbols]);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => {
+      void refreshLiveQuotes();
+    }, 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshLiveQuotes();
+    }, 15_000);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+  }, [refreshLiveQuotes]);
+
+  useEffect(() => {
+    if (initialLoadStarted.current || !watchedSymbols.length) return;
+    initialLoadStarted.current = true;
+    const initial =
+      watchedSymbols.find((item) => item.feed === current.feed) ??
+      watchedSymbols[0];
+    const initialLoad = window.setTimeout(() => {
+      setMarket(initial.market);
+      setSymbol(initial.code);
+      void loadMarketData(initial);
+    }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [current.feed, loadMarketData, watchedSymbols]);
 
   const chooseMarket = (nextMarket: Market) => {
     setMarket(nextMarket);
@@ -878,12 +1113,61 @@ export default function Home() {
     setStatus('데이터 불러오기를 누르세요');
   };
 
+  const activateWatchedSymbol = (item: WatchedSymbol) => {
+    setMarket(item.market);
+    setSymbol(item.code);
+    void loadMarketData(item);
+  };
+
+  const openWatchlistSettings = () => {
+    setWatchlistDraft(watchlist.length ? watchlist : DEFAULT_WATCHLIST);
+    setWatchlistError('');
+    setWatchlistOpen(true);
+  };
+
+  const saveWatchlist = () => {
+    const cleaned = watchlistDraft
+      .map((entry) => ({ ...entry, ticker: entry.ticker.trim().toUpperCase() }))
+      .filter((entry) => entry.ticker);
+    const normalized = cleaned.map(normalizeWatchlistEntry);
+    if (cleaned.length < 1 || cleaned.length > 3) {
+      setWatchlistError('관심종목은 1개에서 3개까지 지정할 수 있습니다.');
+      return;
+    }
+    if (normalized.some((item) => !item)) {
+      setWatchlistError(
+        '미국은 영문 티커, 한국은 6자리 코드 또는 .KS/.KQ 형식으로 입력하세요.',
+      );
+      return;
+    }
+    const feeds = normalized.map((item) => item!.feed);
+    if (new Set(feeds).size !== feeds.length) {
+      setWatchlistError('같은 종목이 중복되어 있습니다.');
+      return;
+    }
+
+    const saved = normalized.map((item) => ({
+      market: item!.market,
+      ticker: item!.feed,
+    }));
+    setWatchlist(saved);
+    setLiveQuotes({});
+    setLiveErrors({});
+    window.localStorage.setItem(
+      'structureflow:watchlist',
+      JSON.stringify(saved),
+    );
+    setWatchlistOpen(false);
+    setStatus('실시간 관심종목을 저장했습니다.');
+  };
+
   const uploadCsv = async (file?: File) => {
     if (!file) return;
     try {
       const candles = parseCsv(await file.text());
       if (candles.length < 20) throw new Error('최소 20개 캔들이 필요합니다.');
       setData(candles);
+      setLoadedFeed(null);
       setTimeframe('15m');
       setStatus(
         `${file.name} · ${candles.length.toLocaleString()}개 캔들 · 계산 완료`,
@@ -1084,7 +1368,7 @@ export default function Home() {
             onChange={(event) => chooseSymbol(event.target.value)}
             aria-label="종목 선택"
           >
-            {symbols[market].map((item) => (
+            {availableSymbols.map((item) => (
               <option key={item.code} value={item.code}>
                 {item.code} · {item.name}
               </option>
@@ -1094,7 +1378,7 @@ export default function Home() {
         </label>
         <button
           className="primary"
-          onClick={() => loadMarketData()}
+          onClick={() => loadMarketData(current)}
           disabled={loading}
         >
           {loading ? (
@@ -1107,12 +1391,92 @@ export default function Home() {
         <div className="price">
           <strong>
             {current.currency}
-            {formatPrice(last, market)}
+            {formatPrice(displayedPrice, market)}
           </strong>
-          <span>{analysis.bias}</span>
+          {activeLiveQuote ? (
+            <span
+              className={activeLiveQuote.change >= 0 ? 'positive' : 'negative'}
+            >
+              {activeLiveQuote.change >= 0 ? '+' : ''}
+              {activeLiveQuote.changePct.toFixed(2)}%
+            </span>
+          ) : (
+            <span>{analysis.bias}</span>
+          )}
         </div>
         <div className="freshness" title={status}>
           {status}
+        </div>
+      </section>
+
+      <section className="live-watchbar" aria-label="실시간 관심종목">
+        <div className="live-watch-head">
+          <div>
+            {liveError ? <WifiOff size={15} /> : <Wifi size={15} />}
+            <span>LIVE WATCH</span>
+          </div>
+          <small>
+            {liveUpdatedAt
+              ? `${new Date(liveUpdatedAt).toLocaleTimeString('ko-KR')} 갱신`
+              : '연결 중'}
+          </small>
+        </div>
+        <div className="live-watch-cards">
+          {watchedSymbols.map((item) => {
+            const quote = liveQuotes[item.feed];
+            const quoteError = liveErrors[item.feed];
+            return (
+              <button
+                type="button"
+                key={item.feed}
+                className={current.feed === item.feed ? 'selected' : ''}
+                onClick={() => activateWatchedSymbol(item)}
+              >
+                <div>
+                  <b>{item.code}</b>
+                  <span className={quote ? 'connected' : 'waiting'}>
+                    {quote ? marketStateLabel(quote.marketState) : '대기'}
+                  </span>
+                </div>
+                {quote ? (
+                  <>
+                    <strong>
+                      {item.currency}
+                      {formatPrice(quote.price, item.market)}
+                    </strong>
+                    <em className={quote.change >= 0 ? 'positive' : 'negative'}>
+                      {quote.change >= 0 ? '+' : ''}
+                      {quote.changePct.toFixed(2)}%
+                    </em>
+                    <small>{quote.name}</small>
+                  </>
+                ) : (
+                  <>
+                    <strong>--</strong>
+                    <em className="quote-error">
+                      {quoteError || liveError || '시세 수신 중'}
+                    </em>
+                    <small>{item.name}</small>
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="live-watch-actions">
+          <button
+            type="button"
+            onClick={() => void refreshLiveQuotes()}
+            disabled={liveLoading}
+            aria-label="실시간 시세 새로고침"
+          >
+            <RefreshCw className={liveLoading ? 'spin' : ''} size={14} />
+            새로고침
+          </button>
+          <button type="button" onClick={openWatchlistSettings}>
+            <Settings2 size={14} /> 종목 설정
+          </button>
+          <small>15초 자동 갱신 · 제공처 지연 가능</small>
         </div>
       </section>
 
@@ -1713,6 +2077,104 @@ export default function Home() {
         <span>STRUCTUREFLOW · 계산 기반 의사결정 지원</span>
         <span>투자 권유 또는 자동 주문 시스템이 아닙니다.</span>
       </footer>
+
+      <Dialog open={watchlistOpen} onOpenChange={setWatchlistOpen}>
+        <DialogContent className="watchlist-dialog">
+          <DialogHeader>
+            <DialogTitle>실시간 관심종목 설정</DialogTitle>
+            <DialogDescription>
+              자동 갱신할 종목을 1개에서 3개까지 지정하세요. 미국은 영문 티커,
+              한국은 6자리 종목 코드를 입력하면 됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="watchlist-editor">
+            {watchlistDraft.map((entry, index) => (
+              <div className="watchlist-editor-row" key={index}>
+                <span>{index + 1}</span>
+                <select
+                  value={entry.market}
+                  aria-label={`관심종목 ${index + 1} 시장`}
+                  onChange={(event) =>
+                    setWatchlistDraft((draft) =>
+                      draft.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? {
+                              market: event.target.value as Market,
+                              ticker: '',
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                >
+                  <option value="US">미국</option>
+                  <option value="KR">한국</option>
+                </select>
+                <input
+                  value={entry.ticker}
+                  placeholder={
+                    entry.market === 'US' ? '예: AAPL' : '예: 005930'
+                  }
+                  aria-label={`관심종목 ${index + 1} 코드`}
+                  maxLength={entry.market === 'US' ? 10 : 9}
+                  onChange={(event) =>
+                    setWatchlistDraft((draft) =>
+                      draft.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? {
+                              ...item,
+                              ticker: event.target.value.toUpperCase(),
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+                <button
+                  type="button"
+                  disabled={watchlistDraft.length === 1}
+                  onClick={() =>
+                    setWatchlistDraft((draft) =>
+                      draft.filter((_, itemIndex) => itemIndex !== index),
+                    )
+                  }
+                  aria-label={`관심종목 ${index + 1} 삭제`}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="add-watch-symbol"
+            disabled={watchlistDraft.length >= 3}
+            onClick={() =>
+              setWatchlistDraft((draft) => [...draft, { market, ticker: '' }])
+            }
+          >
+            <Plus size={14} /> 종목 추가
+          </button>
+          {watchlistError && (
+            <p className="watchlist-error">{watchlistError}</p>
+          )}
+          <div className="watchlist-notice">
+            <Wifi size={16} />
+            <div>
+              <strong>15초 자동 갱신</strong>
+              <p>
+                데이터 제공처의 무료 시세를 사용하므로 거래소 상황에 따라 지연될
+                수 있습니다.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="settings-footer">
+            <button type="button" className="primary" onClick={saveWatchlist}>
+              관심종목 저장
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="settings-dialog">

@@ -34,6 +34,146 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.live-watchbar {
+  min-height: 92px;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 9px 22px;
+  border-bottom: 1px solid var(--line);
+  background: #090e15;
+}
+.live-watch-head {
+  width: 112px;
+  flex: 0 0 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+.live-watch-head > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+}
+.live-watch-head span {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+}
+.live-watch-head small {
+  color: #627084;
+  font-size: 8px;
+}
+.live-watch-cards {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(145px, 1fr));
+  gap: 7px;
+}
+.live-watch-cards > button {
+  position: relative;
+  min-width: 0;
+  border: 1px solid #202a38;
+  background: linear-gradient(145deg, #101720, #0c1219);
+  color: #e8edf5;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.live-watch-cards > button:hover,
+.live-watch-cards > button.selected {
+  border-color: #2b705c;
+  background: #101d1b;
+}
+.live-watch-cards > button.selected::before {
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--green);
+  content: '';
+}
+.live-watch-cards button > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.live-watch-cards b {
+  font: 800 10px monospace;
+}
+.live-watch-cards div span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #7d8a9d;
+  font-size: 7px;
+}
+.live-watch-cards div span::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #647286;
+  content: '';
+}
+.live-watch-cards div span.connected::before {
+  background: var(--green);
+  box-shadow: 0 0 8px #28d59a80;
+}
+.live-watch-cards strong {
+  display: inline-block;
+  margin-top: 5px;
+  font: 800 15px monospace;
+}
+.live-watch-cards em {
+  margin-left: 7px;
+  font-style: normal;
+  font-size: 8px;
+}
+.live-watch-cards small {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #69778a;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-watch-cards .quote-error {
+  color: var(--amber);
+}
+.live-watch-actions {
+  width: 140px;
+  flex: 0 0 140px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: center;
+  gap: 5px;
+}
+.live-watch-actions button {
+  border: 1px solid var(--line);
+  background: #141c27;
+  color: #b9c5d3;
+  border-radius: 6px;
+  padding: 6px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 8px;
+  cursor: pointer;
+}
+.live-watch-actions > small {
+  grid-column: 1 / -1;
+  color: #627084;
+  font-size: 7px;
+  text-align: center;
+}
 
 .structure-zone {
   stroke-width: 1;
@@ -467,7 +607,8 @@ button:disabled {
   font-size: 11px;
 }
 
-.settings-dialog {
+.settings-dialog,
+.watchlist-dialog {
   background: #0f151e !important;
   color: #e8edf5 !important;
   border: 1px solid #2a3545 !important;
@@ -475,17 +616,112 @@ button:disabled {
   max-width: 480px !important;
   padding: 20px !important;
 }
-.settings-dialog [data-slot='dialog-title'] {
+.settings-dialog [data-slot='dialog-title'],
+.watchlist-dialog [data-slot='dialog-title'] {
   font-size: 17px;
   font-weight: 800;
 }
-.settings-dialog [data-slot='dialog-description'] {
+.settings-dialog [data-slot='dialog-description'],
+.watchlist-dialog [data-slot='dialog-description'] {
   color: #8794a6;
   font-size: 11px;
   line-height: 1.55;
 }
-.settings-dialog [data-slot='dialog-close'] {
+.settings-dialog [data-slot='dialog-close'],
+.watchlist-dialog [data-slot='dialog-close'] {
   color: #aab5c3;
+}
+.watchlist-editor {
+  display: grid;
+  gap: 8px;
+}
+.watchlist-editor-row {
+  display: grid;
+  grid-template-columns: 22px 76px 1fr 34px;
+  align-items: center;
+  gap: 7px;
+}
+.watchlist-editor-row > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #1a2430;
+  color: #9aa7b7;
+  font: 800 9px monospace;
+}
+.watchlist-editor-row select,
+.watchlist-editor-row input {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid #2a3545;
+  background: #090e15;
+  color: #edf2f7;
+  border-radius: 7px;
+  padding: 0 9px;
+  outline: none;
+  font-size: 10px;
+}
+.watchlist-editor-row input {
+  font: 800 11px monospace;
+  text-transform: uppercase;
+}
+.watchlist-editor-row select:focus,
+.watchlist-editor-row input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px #28d59a20;
+}
+.watchlist-editor-row > button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #3a2830;
+  background: #21151a;
+  color: var(--red);
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.add-watch-symbol {
+  width: 100%;
+  border: 1px dashed #354255;
+  background: #111821;
+  color: #a7b3c2;
+  border-radius: 7px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.watchlist-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 9px;
+  line-height: 1.5;
+}
+.watchlist-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #255b4b;
+  background: #0d1919;
+  border-radius: 8px;
+  padding: 11px;
+  color: var(--green);
+}
+.watchlist-notice strong {
+  color: #dffbf1;
+  font-size: 10px;
+}
+.watchlist-notice p {
+  margin: 4px 0 0;
+  color: #7f8b9e;
+  font-size: 8px;
+  line-height: 1.45;
 }
 .settings-grid {
   display: grid;
@@ -565,6 +801,40 @@ button:disabled {
   .settings-dialog {
     max-height: calc(100vh - 24px);
     overflow: auto;
+  }
+  .watchlist-dialog {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+  }
+  .live-watchbar {
+    padding: 8px 12px;
+    flex-wrap: wrap;
+  }
+  .live-watch-head {
+    width: 100%;
+    flex: 1 0 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .live-watch-cards {
+    width: 100%;
+    flex: 1 0 100%;
+    display: flex;
+    overflow-x: auto;
+  }
+  .live-watch-cards > button {
+    min-width: 150px;
+    flex: 1;
+  }
+  .live-watch-actions {
+    width: 100%;
+    flex: 1 0 100%;
+    grid-template-columns: 110px 110px 1fr;
+  }
+  .live-watch-actions > small {
+    grid-column: auto;
+    align-self: center;
   }
   .trades-panel {
     margin-bottom: 8px;

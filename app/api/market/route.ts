@@ -13,6 +13,8 @@ type YahooResult = {
     exchangeName?: string;
     currency?: string;
     regularMarketPrice?: number;
+    shortName?: string;
+    longName?: string;
   };
 };
 
@@ -20,21 +22,15 @@ type YahooResponse = {
   chart?: { result?: YahooResult[] | null };
 };
 
-const allowed = new Set([
-  'ONDS',
-  'NVDA',
-  'TSLA',
-  '005930.KS',
-  '000660.KS',
-  '035420.KS',
-]);
+const validSymbol = (symbol: string) =>
+  /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) || /^\d{6}\.(KS|KQ)$/.test(symbol);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const symbol = (url.searchParams.get('symbol') || 'ONDS').toUpperCase();
-  if (!allowed.has(symbol)) {
+  if (!validSymbol(symbol)) {
     return Response.json(
-      { error: '지원하지 않는 종목입니다.' },
+      { error: '올바른 미국 티커 또는 한국 종목 코드를 입력하세요.' },
       { status: 400 },
     );
   }
@@ -86,12 +82,13 @@ export async function GET(request: Request) {
         symbol,
         exchange: result.meta.exchangeName,
         currency: result.meta.currency,
+        name: result.meta.shortName || result.meta.longName || symbol,
         regularMarketPrice: result.meta.regularMarketPrice,
         candles,
         source: 'Yahoo Finance chart feed',
         fetchedAt: new Date().toISOString(),
       },
-      { headers: { 'Cache-Control': 'public, max-age=300' } },
+      { headers: { 'Cache-Control': 'public, max-age=60' } },
     );
   } catch (error) {
     return Response.json(
