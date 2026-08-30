@@ -392,6 +392,39 @@ function clampChartValue(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function createPriceTicks(minimum: number, maximum: number, targetCount = 6) {
+  const range = Math.max(maximum - minimum, 0.000001);
+  const roughStep = range / Math.max(targetCount, 2);
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalizedStep = roughStep / magnitude;
+  const niceMultiplier =
+    normalizedStep <= 1
+      ? 1
+      : normalizedStep <= 2
+        ? 2
+        : normalizedStep <= 2.5
+          ? 2.5
+          : normalizedStep <= 5
+            ? 5
+            : 10;
+  const step = niceMultiplier * magnitude;
+  const first = Math.ceil(minimum / step) * step;
+  const ticks: number[] = [];
+  for (let value = first; value <= maximum + step * 0.001; value += step) {
+    ticks.push(Number(value.toPrecision(12)));
+  }
+  return ticks;
+}
+
+function formatAxisPrice(value: number, market: Market) {
+  if (market === 'KR') return Math.round(value).toLocaleString('ko-KR');
+  const decimals = Math.abs(value) < 1 ? 3 : 2;
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
 type ChartPriceLabel = {
   key: string;
   label: string;
@@ -668,8 +701,10 @@ function PriceChart({
   const width = 900;
   const height = 350;
   const padding = 28;
-  const labelRailWidth = 132;
+  const labelRailWidth = 190;
+  const axisWidth = 56;
   const plotRight = width - padding - labelRailWidth;
+  const axisStart = width - padding - axisWidth;
   const chartBottom = height - padding;
   const visibleZones = [
     ...analysis.orderBlocks,
@@ -721,6 +756,12 @@ function PriceChart({
       (chartBottom - padding);
   const clampedY = (value: number) =>
     clampChartValue(y(value), padding, chartBottom);
+  const priceTicks = createPriceTicks(minimum, maximum);
+  const latestVisibleCandle = displayed.at(-1)!;
+  const currentPrice = latestVisibleCandle.close;
+  const currentPriceY = clampedY(currentPrice);
+  const currentPriceDirection =
+    latestVisibleCandle.close >= latestVisibleCandle.open ? 'up' : 'down';
   const profileMaximum = Math.max(...analysis.profile, 1);
   const volumeLevels = [
     { value: analysis.vah, label: 'VAH' },
@@ -857,16 +898,23 @@ function PriceChart({
               opacity=".08"
             />
           )}
-        {[0, 1, 2, 3, 4].map((index) => (
+        {priceTicks.map((value) => (
           <line
-            key={index}
+            key={value}
             x1={padding}
             x2={plotRight}
-            y1={padding + (index * (height - padding * 2)) / 4}
-            y2={padding + (index * (height - padding * 2)) / 4}
+            y1={y(value)}
+            y2={y(value)}
             className="gridline"
           />
         ))}
+        <line
+          x1={padding}
+          x2={axisStart}
+          y1={currentPriceY}
+          y2={currentPriceY}
+          className={`current-price-line ${currentPriceDirection}`}
+        />
         {showForecast && (
           <g className="entry-forecast-layer">
             <rect
@@ -1046,7 +1094,7 @@ function PriceChart({
                   ? '↓ '
                   : '';
             const railStart = plotRight + 14;
-            const railEnd = width - padding;
+            const railEnd = axisStart - 9;
             return (
               <g key={label.key} className={`price-label-item ${label.tone}`}>
                 <path
@@ -1073,6 +1121,53 @@ function PriceChart({
               </g>
             );
           })}
+        </g>
+        <line
+          x1={axisStart}
+          x2={axisStart}
+          y1={padding}
+          y2={chartBottom}
+          className="price-axis-divider"
+        />
+        <g className="price-axis" aria-label="가격 눈금">
+          {priceTicks
+            .filter((value) => Math.abs(y(value) - currentPriceY) >= 12)
+            .map((value) => (
+              <g key={value}>
+                <line
+                  x1={axisStart}
+                  x2={axisStart + 5}
+                  y1={y(value)}
+                  y2={y(value)}
+                  className="price-axis-tick"
+                />
+                <text
+                  x={width - padding - 4}
+                  y={y(value) + 3}
+                  textAnchor="end"
+                  className="price-axis-text"
+                >
+                  {formatAxisPrice(value, market)}
+                </text>
+              </g>
+            ))}
+          <g className={`current-price-badge ${currentPriceDirection}`}>
+            <rect
+              x={axisStart + 3}
+              y={currentPriceY - 9}
+              width={width - padding - axisStart - 3}
+              height="18"
+              rx="2"
+            />
+            <text
+              x={width - padding - 4}
+              y={currentPriceY + 3}
+              textAnchor="end"
+            >
+              {formatAxisPrice(currentPrice, market)}
+            </text>
+            <title>{`현재가 ${formatPrice(currentPrice, market)}`}</title>
+          </g>
         </g>
       </svg>
     </div>

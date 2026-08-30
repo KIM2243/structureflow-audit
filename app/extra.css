@@ -259,6 +259,7 @@ button:disabled {
   border-radius: 6px;
   background: #0d141deb;
   box-shadow: 0 5px 18px #0006;
+  white-space: nowrap;
 }
 .chart-zoom-controls > span {
   min-width: 42px;
@@ -279,6 +280,7 @@ button:disabled {
   justify-content: center;
   gap: 4px;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 .chart-zoom-controls button:hover:not(:disabled) {
   background: #202b39;
@@ -289,11 +291,16 @@ button:disabled {
   cursor: not-allowed;
 }
 .chart-zoom-controls .reset-label {
-  min-width: 0;
+  display: inline-block;
   color: inherit;
   font:
     700 9px Arial,
     sans-serif;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.chart-zoom-controls button:last-child {
+  min-width: 58px;
 }
 .chart-gesture-hint {
   position: absolute;
@@ -351,6 +358,43 @@ button:disabled {
 .price-rail-divider {
   stroke: #263242;
   stroke-width: 1;
+}
+.price-axis-divider {
+  stroke: #334154;
+  stroke-width: 1;
+}
+.price-axis-tick {
+  stroke: #526073;
+  stroke-width: 1;
+}
+.price-axis-text {
+  fill: #aeb9c8;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: monospace;
+}
+.current-price-line {
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.85;
+}
+.current-price-line.up {
+  stroke: var(--green);
+}
+.current-price-line.down {
+  stroke: var(--red);
+}
+.current-price-badge rect {
+  fill: #169e7b;
+}
+.current-price-badge.down rect {
+  fill: #d84f5e;
+}
+.current-price-badge text {
+  fill: white;
+  font-size: 10px;
+  font-weight: 900;
+  font-family: monospace;
 }
 .price-label-connector {
   fill: none;
@@ -1105,5 +1149,8 @@ button:disabled {
   .chart-zoom-controls .reset-label,
   .chart-gesture-hint {
     display: none;
+  }
+  .chart-zoom-controls button:last-child {
+    min-width: 26px;
   }
 }
