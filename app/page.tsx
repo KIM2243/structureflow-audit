@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   Activity,
   BarChart3,
@@ -26,6 +33,9 @@ import {
   WalletCards,
   Wifi,
   WifiOff,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   Zap,
 } from 'lucide-react';
 
@@ -374,6 +384,14 @@ function downloadTextFile(filename: string, content: string) {
 
 const formatTradeDate = (value: string) => value.slice(0, 16).replace('T', ' ');
 
+const DEFAULT_CHART_BARS = 120;
+const MIN_CHART_BARS = 18;
+const MAX_CHART_BARS = 360;
+
+function clampChartValue(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
 function describeEntryReason(trade: BacktestTrade, market: Market) {
   const direction = trade.side === 'LONG' ? '상향 돌파' : '하향 이탈';
   const averageSide = trade.side === 'LONG' ? '위' : '아래';
@@ -396,35 +414,203 @@ function PriceChart({
   market,
   timeframe,
   layers,
+  seriesKey,
 }: {
   data: Candle[];
   analysis: Analysis;
   market: Market;
   timeframe: Timeframe;
   layers: Record<LayerKey, boolean>;
+  seriesKey: string;
 }) {
-  const displayed = data.slice(-120);
+  const defaultBars = Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length));
+  const [viewport, setViewport] = useState({
+    bars: defaultBars,
+    end: data.length,
+  });
+  const [dragging, setDragging] = useState(false);
+  const seriesKeyRef = useRef(seriesKey);
+  const dataLengthRef = useRef(data.length);
+  const chartRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startEnd: number;
+    bars: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const seriesChanged = seriesKeyRef.current !== seriesKey;
+    const previousLength = dataLengthRef.current;
+    seriesKeyRef.current = seriesKey;
+    dataLengthRef.current = data.length;
+
+    setViewport((previous) => {
+      if (seriesChanged) {
+        return {
+          bars: Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length)),
+          end: data.length,
+        };
+      }
+
+      const maximumBars = Math.min(MAX_CHART_BARS, Math.max(1, data.length));
+      const bars = Math.min(previous.bars, maximumBars);
+      const wasFollowingLatest = previous.end >= previousLength;
+      const end = wasFollowingLatest
+        ? data.length
+        : clampChartValue(previous.end, bars, data.length);
+      return { bars, end };
+    });
+  }, [data.length, seriesKey]);
+
+  const maximumBars = Math.min(MAX_CHART_BARS, Math.max(1, data.length));
+  const minimumBars = Math.min(MIN_CHART_BARS, maximumBars);
+  const visibleBars = clampChartValue(viewport.bars, minimumBars, maximumBars);
+  const endIndex = clampChartValue(viewport.end, visibleBars, data.length);
+  const offset = Math.max(0, endIndex - visibleBars);
+  const displayed = data.slice(offset, endIndex);
+  const isViewingLatest = endIndex >= data.length;
+
+  const zoomBy = (factor: number, anchorRatio = 0.5) => {
+    if (!data.length) return;
+    setViewport((previous) => {
+      const maxBars = Math.min(MAX_CHART_BARS, data.length);
+      const minBars = Math.min(MIN_CHART_BARS, maxBars);
+      const currentBars = clampChartValue(previous.bars, minBars, maxBars);
+      const currentEnd = clampChartValue(
+        previous.end,
+        currentBars,
+        data.length,
+      );
+      const nextBars = clampChartValue(
+        Math.round(currentBars * factor),
+        minBars,
+        maxBars,
+      );
+      if (currentEnd >= data.length) {
+        return { bars: nextBars, end: data.length };
+      }
+      const currentStart = currentEnd - currentBars;
+      const anchorIndex = currentStart + currentBars * anchorRatio;
+      const nextStart = clampChartValue(
+        Math.round(anchorIndex - nextBars * anchorRatio),
+        0,
+        data.length - nextBars,
+      );
+      return { bars: nextBars, end: nextStart + nextBars };
+    });
+  };
+
+  const resetViewport = () => {
+    setViewport({
+      bars: Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length)),
+      end: data.length,
+    });
+  };
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const bounds = chart.getBoundingClientRect();
+      const anchorRatio = clampChartValue(
+        (event.clientX - bounds.left) / Math.max(bounds.width, 1),
+        0,
+        1,
+      );
+      const factor = event.deltaY < 0 ? 0.82 : 1.22;
+      setViewport((previous) => {
+        const maxBars = Math.min(MAX_CHART_BARS, data.length);
+        const minBars = Math.min(MIN_CHART_BARS, maxBars);
+        const currentBars = clampChartValue(previous.bars, minBars, maxBars);
+        const currentEnd = clampChartValue(
+          previous.end,
+          currentBars,
+          data.length,
+        );
+        const nextBars = clampChartValue(
+          Math.round(currentBars * factor),
+          minBars,
+          maxBars,
+        );
+        if (currentEnd >= data.length) {
+          return { bars: nextBars, end: data.length };
+        }
+        const currentStart = currentEnd - currentBars;
+        const anchorIndex = currentStart + currentBars * anchorRatio;
+        const nextStart = clampChartValue(
+          Math.round(anchorIndex - nextBars * anchorRatio),
+          0,
+          data.length - nextBars,
+        );
+        return { bars: nextBars, end: nextStart + nextBars };
+      });
+    };
+
+    chart.addEventListener('wheel', handleWheel, { passive: false });
+    return () => chart.removeEventListener('wheel', handleWheel);
+  }, [data.length]);
+
+  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startEnd: endIndex,
+      bars: visibleBars,
+    };
+    setDragging(true);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const movedBars = Math.round(
+      ((drag.startX - event.clientX) / Math.max(bounds.width, 1)) * drag.bars,
+    );
+    setViewport((previous) => ({
+      ...previous,
+      end: clampChartValue(drag.startEnd + movedBars, drag.bars, data.length),
+    }));
+  };
+
+  const finishPointerDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragRef.current = null;
+    setDragging(false);
+  };
+
   const width = 900;
   const height = 350;
   const padding = 28;
-  const offset = Math.max(0, data.length - displayed.length);
   const visibleZones = [
     ...analysis.orderBlocks,
     ...analysis.fairValueGaps,
-  ].filter((zone) => zone.endIndex >= offset);
+  ].filter((zone) => zone.endIndex >= offset && zone.startIndex < endIndex);
+  const visibleLiquidity = analysis.liquidity.filter(
+    (level) => level.index >= offset && level.index < endIndex,
+  );
+  const showForecast = layers.forecast && isViewingLatest;
   const extraHighs = [
     ...(layers.volumeProfile ? [analysis.vah] : []),
     ...(layers.orderflow ? visibleZones.map((zone) => zone.high) : []),
-    ...(layers.liquidity ? analysis.liquidity.map((level) => level.price) : []),
-    ...(layers.forecast
+    ...(layers.liquidity ? visibleLiquidity.map((level) => level.price) : []),
+    ...(showForecast
       ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
       : []),
   ];
   const extraLows = [
     ...(layers.volumeProfile ? [analysis.val] : []),
     ...(layers.orderflow ? visibleZones.map((zone) => zone.low) : []),
-    ...(layers.liquidity ? analysis.liquidity.map((level) => level.price) : []),
-    ...(layers.forecast
+    ...(layers.liquidity ? visibleLiquidity.map((level) => level.price) : []),
+    ...(showForecast
       ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
       : []),
   ];
@@ -449,26 +635,71 @@ function PriceChart({
     <div className="chart-wrap">
       <div className="chart-badges">
         <span>{timeframe}</span>
-        <span className="soft">OHLCV · {displayed.length} bars</span>
+        <span className="soft">OHLCV · {displayed.length}봉</span>
+        <span className="soft">
+          {isViewingLatest ? '최신 구간' : `${offset + 1}–${endIndex}봉`}
+        </span>
         {layers.orderflow && (
           <span className="soft">
             OB/FVG · {visibleZones.filter((zone) => zone.active).length}
           </span>
         )}
         {layers.liquidity && (
-          <span className="soft">Liquidity · {analysis.liquidity.length}</span>
+          <span className="soft">Liquidity · {visibleLiquidity.length}</span>
         )}
         {layers.forecast && (
           <span
             className={`forecast-badge ${analysis.entryForecast.status.toLowerCase()}`}
           >
-            진입 예측 · {analysis.entryForecast.status}
+            {showForecast
+              ? `진입 예측 · ${analysis.entryForecast.status}`
+              : '진입 예측 · 최신 구간에서 표시'}
           </span>
         )}
       </div>
+      <div className="chart-zoom-controls" aria-label="차트 확대 축소 도구">
+        <button
+          type="button"
+          onClick={() => zoomBy(0.82)}
+          disabled={visibleBars <= minimumBars}
+          aria-label="차트 확대"
+          title="확대"
+        >
+          <ZoomIn size={14} />
+        </button>
+        <span>{displayed.length}봉</span>
+        <button
+          type="button"
+          onClick={() => zoomBy(1.22)}
+          disabled={visibleBars >= maximumBars}
+          aria-label="차트 축소"
+          title="축소"
+        >
+          <ZoomOut size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={resetViewport}
+          aria-label="차트 범위 초기화"
+          title="120봉 최신 구간으로 초기화"
+        >
+          <RotateCcw size={13} />
+          <span className="reset-label">초기화</span>
+        </button>
+      </div>
+      <div className="chart-gesture-hint" aria-hidden="true">
+        휠 확대·축소 · 드래그 이동 · 더블클릭 초기화
+      </div>
       <svg
+        ref={chartRef}
+        className={dragging ? 'dragging' : ''}
         viewBox={`0 0 ${width} ${height}`}
         aria-label={`${timeframe} 가격 구조 차트`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointerDrag}
+        onPointerCancel={finishPointerDrag}
+        onDoubleClick={resetViewport}
       >
         {layers.volumeProfile && (
           <rect
@@ -490,7 +721,7 @@ function PriceChart({
             className="gridline"
           />
         ))}
-        {layers.forecast && (
+        {showForecast && (
           <g className="entry-forecast-layer">
             <rect
               x={x(Math.max(0, displayed.length - 46))}
@@ -642,7 +873,7 @@ function PriceChart({
           ))}
         {layers.structure &&
           analysis.pivots
-            .filter((pivot) => pivot.index >= offset)
+            .filter((pivot) => pivot.index >= offset && pivot.index < endIndex)
             .slice(-12)
             .map((pivot) => (
               <text
@@ -656,7 +887,7 @@ function PriceChart({
               </text>
             ))}
         {layers.liquidity &&
-          analysis.liquidity.map((level) => (
+          visibleLiquidity.map((level) => (
             <g key={`${level.kind}-${level.index}`}>
               <line
                 x1={Math.max(padding, x(Math.max(0, level.index - offset)))}
@@ -1701,6 +1932,7 @@ export default function Home() {
                   market={market}
                   timeframe={timeframe}
                   layers={layers}
+                  seriesKey={`${market}-${current.code}-${timeframe}`}
                 />
                 <div className="vp-suggestion">
                   <div className="vp-icon">
