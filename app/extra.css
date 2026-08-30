@@ -1154,3 +1154,70 @@ button:disabled {
     min-width: 26px;
   }
 }
+.directive > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.directive > div > span {
+  color: var(--green);
+}
+.direction-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.2px;
+}
+.direction-chip.long {
+  color: var(--green);
+  background: #123328;
+}
+.direction-chip.short {
+  color: var(--red);
+  background: #351921;
+}
+.direction-chip.neutral {
+  color: var(--amber);
+  background: #352b18;
+}
+.tf-row > div {
+  min-width: 0;
+}
+.tf-role {
+  margin-left: auto;
+  color: #8290a3;
+  font-size: 8px;
+  white-space: nowrap;
+}
+.tf-row > i.tf-signal {
+  position: absolute;
+  right: 12px;
+  top: 34px;
+  font:
+    800 11px Arial,
+    'Noto Sans KR',
+    sans-serif;
+  font-style: normal;
+}
+.tf-row > i.tf-signal.selected {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 6px;
+  top: 31px;
+  right: 10px;
+  font-size: 10px;
+}
+.tf-signal.bullish {
+  color: var(--green);
+}
+.tf-signal.bearish {
+  color: var(--red);
+}
+.tf-signal.transition {
+  color: var(--amber);
+}

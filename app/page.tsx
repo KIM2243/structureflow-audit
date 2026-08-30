@@ -162,6 +162,40 @@ const timeframeButtonLabels: Record<Timeframe, string> = {
   '1D': '일봉',
 };
 
+function timeframeRole(timeframe: Timeframe) {
+  if (timeframe === '1D') return '상위 추세';
+  if (timeframe === '4H') return '중간 추세';
+  return '실제 진입';
+}
+
+function directionLabel(bias: Analysis['bias']) {
+  if (bias === 'LONG') return '롱 진입';
+  if (bias === 'SHORT') return '숏 진입';
+  return '관망';
+}
+
+function multiTimeframeContext(
+  higherTrend: Snapshot['trend'],
+  middleTrend: Snapshot['trend'],
+  entryBias: Analysis['bias'],
+) {
+  if (higherTrend === 'BULLISH' && entryBias === 'SHORT') {
+    return '상승 추세 내 단기 조정';
+  }
+  if (higherTrend === 'BEARISH' && entryBias === 'LONG') {
+    return '하락 추세 내 단기 반등';
+  }
+  if (
+    middleTrend !== 'TRANSITION' &&
+    ((middleTrend === 'BULLISH' && entryBias === 'LONG') ||
+      (middleTrend === 'BEARISH' && entryBias === 'SHORT'))
+  ) {
+    return '상·중간 추세와 진입 방향 일치';
+  }
+  if (entryBias === 'NEUTRAL') return '방향성 확인 대기';
+  return '시간대별 구조 확인 필요';
+}
+
 const backtestTimeframes: Timeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -1553,6 +1587,12 @@ export default function Home() {
   );
   const analysisData = chartData.length >= 20 ? chartData : data;
   const analysis = useMemo(() => analyze(analysisData), [analysisData]);
+  const selectedDirection = directionLabel(analysis.bias);
+  const timeframeContext = multiTimeframeContext(
+    baseAnalysis.snapshots['1D'].trend,
+    baseAnalysis.snapshots['4H'].trend,
+    analysis.bias,
+  );
   const draftBacktestData = useMemo(
     () => resample(data, timeframeSizes[backtestTimeframe]),
     [backtestTimeframe, data],
@@ -2071,18 +2111,25 @@ export default function Home() {
             </div>
             <div className="directive">
               <div>
-                <i /> {analysis.bias} · 신뢰도 {analysis.confidence}% ·{' '}
-                {timeframe}
+                <i />
+                <strong
+                  className={`direction-chip ${analysis.bias.toLowerCase()}`}
+                >
+                  {selectedDirection}
+                </strong>
+                <span>
+                  {analysis.bias} · 신뢰도 {analysis.confidence}% · {timeframe}
+                </span>
               </div>
               <h1>
                 {analysis.entryForecast.status === 'READY'
-                  ? '진입 조건 충족'
+                  ? `${selectedDirection} 조건 충족`
                   : analysis.entryForecast.status === 'WAIT'
-                    ? '예측 구간 대기'
-                    : '진입 보류'}
+                    ? `${selectedDirection} 구간 대기`
+                    : `${selectedDirection} 보류`}
               </h1>
               <p>
-                {baseAnalysis.snapshots[timeframe].event} ·
+                {baseAnalysis.snapshots[timeframe].event} · {timeframeContext} ·
                 구조·위치·추세·손익비 조건부 예측
               </p>
             </div>
@@ -2129,32 +2176,55 @@ export default function Home() {
                 <span>시간대 구조</span>
                 <small>클릭하여 차트 전환</small>
               </div>
-              {timeframeRows.map(([name, snapshot]) => (
-                <button
-                  className={`tf-row ${timeframe === name ? 'selected' : ''}`}
-                  key={name}
-                  onClick={() => setTimeframe(name)}
-                  aria-pressed={timeframe === name}
-                >
-                  <div>
-                    <b>{name}</b>
-                    <em
-                      className={
-                        snapshot.trend === 'BULLISH'
-                          ? 'bull'
-                          : snapshot.trend === 'BEARISH'
-                            ? 'wait'
-                            : 'trans'
-                      }
+              {timeframeRows.map(([name, snapshot]) =>
+                (() => {
+                  const selected = timeframe === name;
+                  const rowBias: Analysis['bias'] = selected
+                    ? analysis.bias
+                    : snapshot.trend === 'BULLISH'
+                      ? 'LONG'
+                      : snapshot.trend === 'BEARISH'
+                        ? 'SHORT'
+                        : 'NEUTRAL';
+                  return (
+                    <button
+                      className={`tf-row ${selected ? 'selected' : ''}`}
+                      key={name}
+                      onClick={() => setTimeframe(name)}
+                      aria-pressed={selected}
                     >
-                      {snapshot.trend}
-                    </em>
-                  </div>
-                  <strong>{snapshot.sequence}</strong>
-                  <span>{snapshot.event}</span>
-                  <i>{snapshot.score}</i>
-                </button>
-              ))}
+                      <div>
+                        <b>{name}</b>
+                        <em
+                          className={
+                            snapshot.trend === 'BULLISH'
+                              ? 'bull'
+                              : snapshot.trend === 'BEARISH'
+                                ? 'wait'
+                                : 'trans'
+                          }
+                        >
+                          {snapshot.trend}
+                        </em>
+                        <small className="tf-role">{timeframeRole(name)}</small>
+                      </div>
+                      <strong>{snapshot.sequence}</strong>
+                      <span>{snapshot.event}</span>
+                      <i
+                        className={`tf-signal ${rowBias.toLowerCase()} ${selected ? 'selected' : ''}`}
+                      >
+                        {selected
+                          ? directionLabel(rowBias)
+                          : rowBias === 'LONG'
+                            ? '롱 우세'
+                            : rowBias === 'SHORT'
+                              ? '숏 우세'
+                              : '관망'}
+                      </i>
+                    </button>
+                  );
+                })(),
+              )}
               <div className="wyckoff">
                 <small>VOLUME / WYCKOFF 단서</small>
                 <strong>
