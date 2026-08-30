@@ -348,6 +348,67 @@ button:disabled {
 .entry-target-label {
   fill: #72e7bc;
 }
+.price-rail-divider {
+  stroke: #263242;
+  stroke-width: 1;
+}
+.price-label-connector {
+  fill: none;
+  stroke: #627084;
+  stroke-width: 1;
+  opacity: 0.8;
+}
+.price-label-badge {
+  fill: #111923;
+  stroke: #354256;
+  stroke-width: 1;
+}
+.price-label-text {
+  fill: #d5dee9;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: Arial, 'Noto Sans KR', sans-serif;
+}
+.price-label-item.profile .price-label-connector,
+.price-label-item.profile .price-label-badge {
+  stroke: #8a78ff;
+}
+.price-label-item.profile .price-label-text {
+  fill: #c7bfff;
+}
+.price-label-item.entry .price-label-connector,
+.price-label-item.entry .price-label-badge {
+  stroke: #66d4eb;
+}
+.price-label-item.entry .price-label-text {
+  fill: #9ce9f7;
+}
+.price-label-item.stop .price-label-connector,
+.price-label-item.stop .price-label-badge {
+  stroke: var(--red);
+}
+.price-label-item.stop .price-label-text {
+  fill: #ff9ba4;
+}
+.price-label-item.target .price-label-connector,
+.price-label-item.target .price-label-badge {
+  stroke: var(--green);
+}
+.price-label-item.target .price-label-text {
+  fill: #81ecc4;
+}
+.structure-marker circle {
+  fill: #08130f;
+  stroke: var(--green);
+  stroke-width: 1.4;
+}
+.structure-marker .structure {
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #091019;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 .forecast-plan .forecast-status.ready {
   color: var(--green);
   background: #173a30;

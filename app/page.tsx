@@ -392,6 +392,84 @@ function clampChartValue(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+type ChartPriceLabel = {
+  key: string;
+  label: string;
+  value: number;
+  tone: 'profile' | 'entry' | 'stop' | 'target';
+};
+
+function layoutChartPriceLabels(
+  labels: ChartPriceLabel[],
+  priceToY: (value: number) => number,
+  top: number,
+  bottom: number,
+) {
+  const gap = 19;
+  const positioned = labels
+    .map((label) => {
+      const rawY = priceToY(label.value);
+      return {
+        ...label,
+        rawY,
+        lineY: clampChartValue(rawY, top, bottom),
+        labelY: clampChartValue(rawY, top, bottom),
+        edge:
+          rawY < top
+            ? ('above' as const)
+            : rawY > bottom
+              ? ('below' as const)
+              : null,
+      };
+    })
+    .sort((left, right) => left.labelY - right.labelY);
+
+  for (let index = 1; index < positioned.length; index += 1) {
+    positioned[index].labelY = Math.max(
+      positioned[index].labelY,
+      positioned[index - 1].labelY + gap,
+    );
+  }
+  if (positioned.at(-1)?.labelY && positioned.at(-1)!.labelY > bottom) {
+    positioned[positioned.length - 1].labelY = bottom;
+    for (let index = positioned.length - 2; index >= 0; index -= 1) {
+      positioned[index].labelY = Math.min(
+        positioned[index].labelY,
+        positioned[index + 1].labelY - gap,
+      );
+    }
+  }
+  if (positioned[0]?.labelY < top) {
+    const shift = top - positioned[0].labelY;
+    for (const label of positioned) label.labelY += shift;
+  }
+  return positioned;
+}
+
+function selectChartPivots(
+  pivots: Analysis['pivots'],
+  startIndex: number,
+  endIndex: number,
+  visibleCount: number,
+) {
+  const maximumLabels = visibleCount <= 24 ? 6 : visibleCount <= 60 ? 8 : 10;
+  const minimumGap = Math.max(2, Math.floor(visibleCount / maximumLabels));
+  const candidates = pivots.filter(
+    (pivot) => pivot.index >= startIndex && pivot.index < endIndex,
+  );
+  const selected: Analysis['pivots'] = [];
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const pivot = candidates[index];
+    if (
+      selected.length < maximumLabels &&
+      selected.every((item) => Math.abs(item.index - pivot.index) >= minimumGap)
+    ) {
+      selected.push(pivot);
+    }
+  }
+  return selected.sort((left, right) => left.index - right.index);
+}
+
 function describeEntryReason(trade: BacktestTrade, market: Market) {
   const direction = trade.side === 'LONG' ? '상향 돌파' : '하향 이탈';
   const averageSide = trade.side === 'LONG' ? '위' : '아래';
@@ -590,6 +668,9 @@ function PriceChart({
   const width = 900;
   const height = 350;
   const padding = 28;
+  const labelRailWidth = 132;
+  const plotRight = width - padding - labelRailWidth;
+  const chartBottom = height - padding;
   const visibleZones = [
     ...analysis.orderBlocks,
     ...analysis.fairValueGaps,
@@ -598,38 +679,97 @@ function PriceChart({
     (level) => level.index >= offset && level.index < endIndex,
   );
   const showForecast = layers.forecast && isViewingLatest;
-  const extraHighs = [
-    ...(layers.volumeProfile ? [analysis.vah] : []),
-    ...(layers.orderflow ? visibleZones.map((zone) => zone.high) : []),
-    ...(layers.liquidity ? visibleLiquidity.map((level) => level.price) : []),
-    ...(showForecast
-      ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
-      : []),
-  ];
-  const extraLows = [
-    ...(layers.volumeProfile ? [analysis.val] : []),
-    ...(layers.orderflow ? visibleZones.map((zone) => zone.low) : []),
-    ...(layers.liquidity ? visibleLiquidity.map((level) => level.price) : []),
-    ...(showForecast
-      ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
-      : []),
-  ];
-  const maximum = Math.max(
-    ...displayed.map((candle) => candle.high),
-    ...extraHighs,
+  const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
+  const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
+  const visiblePriceSpan = Math.max(
+    candleMaximum - candleMinimum,
+    Math.abs(candleMaximum) * 0.0015,
+    0.0001,
   );
-  const minimum = Math.min(
-    ...displayed.map((candle) => candle.low),
-    ...extraLows,
+  const autoFitMinimum = candleMinimum - visiblePriceSpan * 0.75;
+  const autoFitMaximum = candleMaximum + visiblePriceSpan * 0.75;
+  const nearbyOverlayValues = [
+    ...(layers.volumeProfile ? [analysis.vah, analysis.poc, analysis.val] : []),
+    ...(layers.orderflow
+      ? visibleZones.flatMap((zone) => [zone.high, zone.low])
+      : []),
+    ...(layers.liquidity ? visibleLiquidity.map((level) => level.price) : []),
+    ...(showForecast
+      ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
+      : []),
+  ].filter((value) => value >= autoFitMinimum && value <= autoFitMaximum);
+  const fittedMaximum = Math.max(candleMaximum, ...nearbyOverlayValues);
+  const fittedMinimum = Math.min(candleMinimum, ...nearbyOverlayValues);
+  const fittedSpan = Math.max(fittedMaximum - fittedMinimum, visiblePriceSpan);
+  const verticalPadding = fittedSpan * 0.12;
+  const maximum = fittedMaximum + verticalPadding;
+  const minimum = fittedMinimum - verticalPadding;
+  const isPriceOnScale = (value: number) =>
+    value >= minimum && value <= maximum;
+  const scaledZones = visibleZones.filter(
+    (zone) => zone.low <= maximum && zone.high >= minimum,
+  );
+  const scaledLiquidity = visibleLiquidity.filter((level) =>
+    isPriceOnScale(level.price),
   );
   const x = (index: number) =>
     padding +
-    (index / Math.max(displayed.length - 1, 1)) * (width - padding * 2);
+    (index / Math.max(displayed.length - 1, 1)) * (plotRight - padding);
   const y = (value: number) =>
     padding +
-    ((maximum - value) / Math.max(maximum - minimum, 1)) *
-      (height - padding * 2);
+    ((maximum - value) / Math.max(maximum - minimum, 0.000001)) *
+      (chartBottom - padding);
+  const clampedY = (value: number) =>
+    clampChartValue(y(value), padding, chartBottom);
   const profileMaximum = Math.max(...analysis.profile, 1);
+  const volumeLevels = [
+    { value: analysis.vah, label: 'VAH' },
+    { value: analysis.poc, label: 'POC' },
+    { value: analysis.val, label: 'VAL' },
+  ];
+  const priceLabels = layoutChartPriceLabels(
+    [
+      ...(layers.volumeProfile
+        ? volumeLevels.map((level) => ({
+            key: level.label,
+            label: `${level.label} ${formatPrice(level.value, market)}`,
+            value: level.value,
+            tone: 'profile' as const,
+          }))
+        : []),
+      ...(showForecast
+        ? [
+            {
+              key: 'forecast-entry',
+              label: `진입 ${formatPrice(analysis.entryForecast.trigger, market)}`,
+              value: analysis.entryForecast.trigger,
+              tone: 'entry' as const,
+            },
+            {
+              key: 'forecast-stop',
+              label: `무효화 ${formatPrice(analysis.stop, market)}`,
+              value: analysis.stop,
+              tone: 'stop' as const,
+            },
+            {
+              key: 'forecast-target',
+              label: `목표 ${formatPrice(analysis.target, market)}`,
+              value: analysis.target,
+              tone: 'target' as const,
+            },
+          ]
+        : []),
+    ],
+    y,
+    padding + 8,
+    chartBottom - 8,
+  );
+  const structurePivots = selectChartPivots(
+    analysis.pivots,
+    offset,
+    endIndex,
+    displayed.length,
+  );
 
   return (
     <div className="chart-wrap">
@@ -639,6 +779,7 @@ function PriceChart({
         <span className="soft">
           {isViewingLatest ? '최신 구간' : `${offset + 1}–${endIndex}봉`}
         </span>
+        <span className="soft">Y축 · 화면 맞춤</span>
         {layers.orderflow && (
           <span className="soft">
             OB/FVG · {visibleZones.filter((zone) => zone.active).length}
@@ -701,21 +842,26 @@ function PriceChart({
         onPointerCancel={finishPointerDrag}
         onDoubleClick={resetViewport}
       >
-        {layers.volumeProfile && (
-          <rect
-            x={padding}
-            y={y(analysis.vah)}
-            width={width - padding * 2}
-            height={y(analysis.val) - y(analysis.vah)}
-            fill="#6d5dfc"
-            opacity=".08"
-          />
-        )}
+        {layers.volumeProfile &&
+          analysis.val <= maximum &&
+          analysis.vah >= minimum && (
+            <rect
+              x={padding}
+              y={clampedY(analysis.vah)}
+              width={plotRight - padding}
+              height={Math.max(
+                2,
+                clampedY(analysis.val) - clampedY(analysis.vah),
+              )}
+              fill="#6d5dfc"
+              opacity=".08"
+            />
+          )}
         {[0, 1, 2, 3, 4].map((index) => (
           <line
             key={index}
             x1={padding}
-            x2={width - padding}
+            x2={plotRight}
             y1={padding + (index * (height - padding * 2)) / 4}
             y2={padding + (index * (height - padding * 2)) / 4}
             className="gridline"
@@ -725,63 +871,44 @@ function PriceChart({
           <g className="entry-forecast-layer">
             <rect
               x={x(Math.max(0, displayed.length - 46))}
-              y={Math.min(y(analysis.entry[0]), y(analysis.entry[1]))}
-              width={width - padding - x(Math.max(0, displayed.length - 46))}
+              y={Math.min(
+                clampedY(analysis.entry[0]),
+                clampedY(analysis.entry[1]),
+              )}
+              width={plotRight - x(Math.max(0, displayed.length - 46))}
               height={Math.max(
                 2,
-                Math.abs(y(analysis.entry[0]) - y(analysis.entry[1])),
+                Math.abs(
+                  clampedY(analysis.entry[0]) - clampedY(analysis.entry[1]),
+                ),
               )}
               className="entry-forecast-zone"
             />
             <line
               x1={x(Math.max(0, displayed.length - 46))}
-              x2={width - padding}
-              y1={y(analysis.entryForecast.trigger)}
-              y2={y(analysis.entryForecast.trigger)}
+              x2={plotRight}
+              y1={clampedY(analysis.entryForecast.trigger)}
+              y2={clampedY(analysis.entryForecast.trigger)}
               className="entry-trigger-line"
             />
             <line
               x1={x(Math.max(0, displayed.length - 46))}
-              x2={width - padding}
-              y1={y(analysis.stop)}
-              y2={y(analysis.stop)}
+              x2={plotRight}
+              y1={clampedY(analysis.stop)}
+              y2={clampedY(analysis.stop)}
               className="entry-invalidation-line"
             />
             <line
               x1={x(Math.max(0, displayed.length - 46))}
-              x2={width - padding}
-              y1={y(analysis.target)}
-              y2={y(analysis.target)}
+              x2={plotRight}
+              y1={clampedY(analysis.target)}
+              y2={clampedY(analysis.target)}
               className="entry-target-line"
             />
-            <text
-              x={width - padding - 4}
-              y={y(analysis.entryForecast.trigger) - 5}
-              textAnchor="end"
-              className="entry-forecast-label"
-            >
-              예측 진입 {formatPrice(analysis.entryForecast.trigger, market)}
-            </text>
-            <text
-              x={width - padding - 4}
-              y={y(analysis.stop) - 5}
-              textAnchor="end"
-              className="entry-invalidation-label"
-            >
-              무효화 {formatPrice(analysis.stop, market)}
-            </text>
-            <text
-              x={width - padding - 4}
-              y={y(analysis.target) - 5}
-              textAnchor="end"
-              className="entry-target-label"
-            >
-              목표 {formatPrice(analysis.target, market)}
-            </text>
           </g>
         )}
         {layers.orderflow &&
-          visibleZones.map((zone) => {
+          scaledZones.map((zone) => {
             const start = Math.max(0, zone.startIndex - offset);
             const zoneClass = zone.kind.toLowerCase().replace('_', '-');
             return (
@@ -791,14 +918,14 @@ function PriceChart({
               >
                 <rect
                   x={x(start)}
-                  y={y(zone.high)}
-                  width={Math.max(20, width - padding - x(start))}
-                  height={Math.max(2, y(zone.low) - y(zone.high))}
+                  y={clampedY(zone.high)}
+                  width={Math.max(20, plotRight - x(start))}
+                  height={Math.max(2, clampedY(zone.low) - clampedY(zone.high))}
                   className={`structure-zone ${zoneClass}`}
                 />
                 <text
                   x={x(start) + 4}
-                  y={y(zone.high) - 4}
+                  y={clampedY(zone.high) - 4}
                   className="zone-label"
                 >
                   {zone.label}
@@ -808,13 +935,14 @@ function PriceChart({
           })}
         {layers.volumeProfile &&
           analysis.profile.map((volume, index) => {
-            const barWidth = (volume / profileMaximum) * 105;
+            const barWidth = (volume / profileMaximum) * 90;
             const center =
               analysis.profileMin + (index + 0.5) * analysis.profileStep;
+            if (!isPriceOnScale(center)) return null;
             return (
               <rect
                 key={index}
-                x={width - padding - barWidth}
+                x={plotRight - barWidth}
                 y={y(center) - 2}
                 width={barWidth}
                 height={4}
@@ -826,7 +954,7 @@ function PriceChart({
           const upward = candle.close >= candle.open;
           const candleWidth = Math.max(
             2,
-            ((width - padding * 2) / displayed.length) * 0.58,
+            ((plotRight - padding) / displayed.length) * 0.58,
           );
           return (
             <g key={`${candle.date}-${index}`}>
@@ -848,50 +976,50 @@ function PriceChart({
           );
         })}
         {layers.volumeProfile &&
-          [
-            { value: analysis.vah, label: 'VAH' },
-            { value: analysis.poc, label: 'POC' },
-            { value: analysis.val, label: 'VAL' },
-          ].map((level) => (
-            <g key={level.label}>
-              <line
-                x1={padding}
-                x2={width - padding}
-                y1={y(level.value)}
-                y2={y(level.value)}
-                className={`level ${level.label.toLowerCase()}`}
+          volumeLevels
+            .filter((level) => isPriceOnScale(level.value))
+            .map((level) => (
+              <g key={level.label}>
+                <line
+                  x1={padding}
+                  x2={plotRight}
+                  y1={y(level.value)}
+                  y2={y(level.value)}
+                  className={`level ${level.label.toLowerCase()}`}
+                />
+              </g>
+            ))}
+        {layers.structure &&
+          structurePivots.map((pivot) => (
+            <g
+              key={`${pivot.kind}-${pivot.index}`}
+              className={`structure-marker ${pivot.kind}`}
+            >
+              <circle
+                cx={x(pivot.index - offset)}
+                cy={y(pivot.price)}
+                r="2.5"
               />
               <text
-                x={width - padding - 4}
-                y={y(level.value) - 5}
-                textAnchor="end"
-                className="level-label"
-              >
-                {level.label} {formatPrice(level.value, market)}
-              </text>
-            </g>
-          ))}
-        {layers.structure &&
-          analysis.pivots
-            .filter((pivot) => pivot.index >= offset && pivot.index < endIndex)
-            .slice(-12)
-            .map((pivot) => (
-              <text
-                key={`${pivot.kind}-${pivot.index}`}
                 x={x(pivot.index - offset)}
-                y={y(pivot.price) + (pivot.kind === 'high' ? -8 : 15)}
+                y={y(pivot.price) + (pivot.kind === 'high' ? -10 : 17)}
                 textAnchor="middle"
                 className="structure"
               >
                 {pivot.label}
               </text>
-            ))}
+              <title>
+                {pivot.label} · {formatPrice(pivot.price, market)} ·{' '}
+                {data[pivot.index]?.date.slice(0, 16)}
+              </title>
+            </g>
+          ))}
         {layers.liquidity &&
-          visibleLiquidity.map((level) => (
+          scaledLiquidity.map((level) => (
             <g key={`${level.kind}-${level.index}`}>
               <line
                 x1={Math.max(padding, x(Math.max(0, level.index - offset)))}
-                x2={width - padding}
+                x2={plotRight}
                 y1={y(level.price)}
                 y2={y(level.price)}
                 className={`liquidity-level ${level.kind === 'BUY_SIDE' ? 'buy-side' : 'sell-side'}`}
@@ -905,6 +1033,50 @@ function PriceChart({
               </text>
             </g>
           ))}
+        <line
+          x1={plotRight + 7}
+          x2={plotRight + 7}
+          y1={padding}
+          y2={chartBottom}
+          className="price-rail-divider"
+        />
+        <g className="price-label-rail">
+          {priceLabels.map((label) => {
+            const edgePrefix =
+              label.edge === 'above'
+                ? '↑ '
+                : label.edge === 'below'
+                  ? '↓ '
+                  : '';
+            const railStart = plotRight + 14;
+            const railEnd = width - padding;
+            return (
+              <g key={label.key} className={`price-label-item ${label.tone}`}>
+                <path
+                  d={`M ${plotRight - 3} ${label.lineY} L ${railStart - 5} ${label.labelY} L ${railStart} ${label.labelY}`}
+                  className="price-label-connector"
+                />
+                <rect
+                  x={railStart}
+                  y={label.labelY - 9}
+                  width={railEnd - railStart}
+                  height="18"
+                  rx="3"
+                  className="price-label-badge"
+                />
+                <text
+                  x={railEnd - 5}
+                  y={label.labelY + 3}
+                  textAnchor="end"
+                  className="price-label-text"
+                >
+                  {edgePrefix}
+                  {label.label}
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </svg>
     </div>
   );
