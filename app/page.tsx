@@ -917,290 +917,301 @@ function PriceChart({
         onPointerCancel={finishPointerDrag}
         onDoubleClick={resetViewport}
       >
-        {layers.volumeProfile &&
-          analysis.val <= maximum &&
-          analysis.vah >= minimum && (
-            <rect
-              x={padding}
-              y={clampedY(analysis.vah)}
-              width={plotRight - padding}
-              height={Math.max(
-                2,
-                clampedY(analysis.val) - clampedY(analysis.vah),
-              )}
-              fill="#6d5dfc"
-              opacity=".08"
+        <g
+          key={`viewport-${seriesKey}-${offset}-${endIndex}-${visibleBars}`}
+          className="chart-viewport-layer"
+        >
+          {layers.volumeProfile &&
+            analysis.val <= maximum &&
+            analysis.vah >= minimum && (
+              <rect
+                x={padding}
+                y={clampedY(analysis.vah)}
+                width={plotRight - padding}
+                height={Math.max(
+                  2,
+                  clampedY(analysis.val) - clampedY(analysis.vah),
+                )}
+                fill="#6d5dfc"
+                opacity=".08"
+              />
+            )}
+          {priceTicks.map((value) => (
+            <line
+              key={value}
+              x1={padding}
+              x2={plotRight}
+              y1={y(value)}
+              y2={y(value)}
+              className="gridline"
             />
-          )}
-        {priceTicks.map((value) => (
+          ))}
           <line
-            key={value}
             x1={padding}
-            x2={plotRight}
-            y1={y(value)}
-            y2={y(value)}
-            className="gridline"
+            x2={axisStart}
+            y1={currentPriceY}
+            y2={currentPriceY}
+            className={`current-price-line ${currentPriceDirection}`}
           />
-        ))}
-        <line
-          x1={padding}
-          x2={axisStart}
-          y1={currentPriceY}
-          y2={currentPriceY}
-          className={`current-price-line ${currentPriceDirection}`}
-        />
-        {showForecast && (
-          <g className="entry-forecast-layer">
-            <rect
-              x={x(Math.max(0, displayed.length - 46))}
-              y={Math.min(
-                clampedY(analysis.entry[0]),
-                clampedY(analysis.entry[1]),
-              )}
-              width={plotRight - x(Math.max(0, displayed.length - 46))}
-              height={Math.max(
-                2,
-                Math.abs(
-                  clampedY(analysis.entry[0]) - clampedY(analysis.entry[1]),
-                ),
-              )}
-              className="entry-forecast-zone"
-            />
-            <line
-              x1={x(Math.max(0, displayed.length - 46))}
-              x2={plotRight}
-              y1={clampedY(analysis.entryForecast.trigger)}
-              y2={clampedY(analysis.entryForecast.trigger)}
-              className="entry-trigger-line"
-            />
-            <line
-              x1={x(Math.max(0, displayed.length - 46))}
-              x2={plotRight}
-              y1={clampedY(analysis.stop)}
-              y2={clampedY(analysis.stop)}
-              className="entry-invalidation-line"
-            />
-            <line
-              x1={x(Math.max(0, displayed.length - 46))}
-              x2={plotRight}
-              y1={clampedY(analysis.target)}
-              y2={clampedY(analysis.target)}
-              className="entry-target-line"
-            />
-          </g>
-        )}
-        {layers.orderflow &&
-          scaledZones.map((zone) => {
-            const start = Math.max(0, zone.startIndex - offset);
-            const zoneClass = zone.kind.toLowerCase().replace('_', '-');
-            return (
-              <g
-                key={`${zone.kind}-${zone.startIndex}`}
-                opacity={zone.active ? 1 : 0.35}
-              >
-                <rect
-                  x={x(start)}
-                  y={clampedY(zone.high)}
-                  width={Math.max(20, plotRight - x(start))}
-                  height={Math.max(2, clampedY(zone.low) - clampedY(zone.high))}
-                  className={`structure-zone ${zoneClass}`}
-                />
-                <text
-                  x={x(start) + 4}
-                  y={clampedY(zone.high) - 4}
-                  className="zone-label"
-                >
-                  {zone.label}
-                </text>
-              </g>
-            );
-          })}
-        {layers.volumeProfile &&
-          analysis.profile.map((volume, index) => {
-            const barWidth = (volume / profileMaximum) * 90;
-            const center =
-              analysis.profileMin + (index + 0.5) * analysis.profileStep;
-            if (!isPriceOnScale(center)) return null;
-            return (
+          {showForecast && (
+            <g className="entry-forecast-layer">
               <rect
-                key={index}
-                x={plotRight - barWidth}
-                y={y(center) - 2}
-                width={barWidth}
-                height={4}
-                className="profile-bar"
+                x={x(Math.max(0, displayed.length - 46))}
+                y={Math.min(
+                  clampedY(analysis.entry[0]),
+                  clampedY(analysis.entry[1]),
+                )}
+                width={plotRight - x(Math.max(0, displayed.length - 46))}
+                height={Math.max(
+                  2,
+                  Math.abs(
+                    clampedY(analysis.entry[0]) - clampedY(analysis.entry[1]),
+                  ),
+                )}
+                className="entry-forecast-zone"
               />
-            );
-          })}
-        {displayed.map((candle, index) => {
-          const upward = candle.close >= candle.open;
-          const candleWidth = Math.max(
-            2,
-            ((plotRight - padding) / displayed.length) * 0.58,
-          );
-          return (
-            <g key={`${candle.date}-${index}`}>
               <line
-                x1={x(index)}
-                x2={x(index)}
-                y1={y(candle.high)}
-                y2={y(candle.low)}
-                className={upward ? 'wick up' : 'wick down'}
-              />
-              <rect
-                x={x(index) - candleWidth / 2}
-                y={Math.min(y(candle.open), y(candle.close))}
-                width={candleWidth}
-                height={Math.max(1, Math.abs(y(candle.open) - y(candle.close)))}
-                className={upward ? 'candle up' : 'candle down'}
-              />
-            </g>
-          );
-        })}
-        {layers.volumeProfile &&
-          volumeLevels
-            .filter((level) => isPriceOnScale(level.value))
-            .map((level) => (
-              <g key={level.label}>
-                <line
-                  x1={padding}
-                  x2={plotRight}
-                  y1={y(level.value)}
-                  y2={y(level.value)}
-                  className={`level ${level.label.toLowerCase()}`}
-                />
-              </g>
-            ))}
-        {layers.structure &&
-          structurePivots.map((pivot) => (
-            <g
-              key={`${pivot.kind}-${pivot.index}`}
-              className={`structure-marker ${pivot.kind}`}
-            >
-              <circle
-                cx={x(pivot.index - offset)}
-                cy={y(pivot.price)}
-                r="2.5"
-              />
-              <text
-                x={x(pivot.index - offset)}
-                y={y(pivot.price) + (pivot.kind === 'high' ? -10 : 17)}
-                textAnchor="middle"
-                className="structure"
-              >
-                {pivot.label}
-              </text>
-              <title>{`${pivot.label} · ${formatPrice(pivot.price, market)} · ${data[pivot.index]?.date.slice(0, 16) ?? ''}`}</title>
-            </g>
-          ))}
-        {layers.liquidity &&
-          scaledLiquidity.map((level) => (
-            <g key={`${level.kind}-${level.index}`}>
-              <line
-                x1={Math.max(padding, x(Math.max(0, level.index - offset)))}
+                x1={x(Math.max(0, displayed.length - 46))}
                 x2={plotRight}
-                y1={y(level.price)}
-                y2={y(level.price)}
-                className={`liquidity-level ${level.kind === 'BUY_SIDE' ? 'buy-side' : 'sell-side'}`}
+                y1={clampedY(analysis.entryForecast.trigger)}
+                y2={clampedY(analysis.entryForecast.trigger)}
+                className="entry-trigger-line"
               />
-              <text
-                x={padding + 4}
-                y={y(level.price) - 4}
-                className="liquidity-label"
-              >
-                {level.kind === 'BUY_SIDE' ? 'BSL' : 'SSL'} ×{level.touches}
-              </text>
+              <line
+                x1={x(Math.max(0, displayed.length - 46))}
+                x2={plotRight}
+                y1={clampedY(analysis.stop)}
+                y2={clampedY(analysis.stop)}
+                className="entry-invalidation-line"
+              />
+              <line
+                x1={x(Math.max(0, displayed.length - 46))}
+                x2={plotRight}
+                y1={clampedY(analysis.target)}
+                y2={clampedY(analysis.target)}
+                className="entry-target-line"
+              />
             </g>
-          ))}
-        <line
-          x1={plotRight + 7}
-          x2={plotRight + 7}
-          y1={padding}
-          y2={chartBottom}
-          className="price-rail-divider"
-        />
-        <g className="price-label-rail">
-          {priceLabels.map((label) => {
-            const edgePrefix =
-              label.edge === 'above'
-                ? '↑ '
-                : label.edge === 'below'
-                  ? '↓ '
-                  : '';
-            const railStart = plotRight + 14;
-            const railEnd = axisStart - 9;
+          )}
+          {layers.orderflow &&
+            scaledZones.map((zone) => {
+              const start = Math.max(0, zone.startIndex - offset);
+              const zoneClass = zone.kind.toLowerCase().replace('_', '-');
+              return (
+                <g
+                  key={`${zone.kind}-${zone.startIndex}`}
+                  opacity={zone.active ? 1 : 0.35}
+                >
+                  <rect
+                    x={x(start)}
+                    y={clampedY(zone.high)}
+                    width={Math.max(20, plotRight - x(start))}
+                    height={Math.max(
+                      2,
+                      clampedY(zone.low) - clampedY(zone.high),
+                    )}
+                    className={`structure-zone ${zoneClass}`}
+                  />
+                  <text
+                    x={x(start) + 4}
+                    y={clampedY(zone.high) - 4}
+                    className="zone-label"
+                  >
+                    {zone.label}
+                  </text>
+                </g>
+              );
+            })}
+          {layers.volumeProfile &&
+            analysis.profile.map((volume, index) => {
+              const barWidth = (volume / profileMaximum) * 90;
+              const center =
+                analysis.profileMin + (index + 0.5) * analysis.profileStep;
+              if (!isPriceOnScale(center)) return null;
+              return (
+                <rect
+                  key={index}
+                  x={plotRight - barWidth}
+                  y={y(center) - 2}
+                  width={barWidth}
+                  height={4}
+                  className="profile-bar"
+                />
+              );
+            })}
+          {displayed.map((candle, index) => {
+            const upward = candle.close >= candle.open;
+            const candleWidth = Math.max(
+              2,
+              ((plotRight - padding) / displayed.length) * 0.58,
+            );
             return (
-              <g key={label.key} className={`price-label-item ${label.tone}`}>
-                <path
-                  d={`M ${plotRight - 3} ${label.lineY} L ${railStart - 5} ${label.labelY} L ${railStart} ${label.labelY}`}
-                  className="price-label-connector"
+              <g key={`${candle.date}-${index}`}>
+                <line
+                  x1={x(index)}
+                  x2={x(index)}
+                  y1={y(candle.high)}
+                  y2={y(candle.low)}
+                  className={upward ? 'wick up' : 'wick down'}
                 />
                 <rect
-                  x={railStart}
-                  y={label.labelY - 9}
-                  width={railEnd - railStart}
-                  height="18"
-                  rx="3"
-                  className="price-label-badge"
+                  x={x(index) - candleWidth / 2}
+                  y={Math.min(y(candle.open), y(candle.close))}
+                  width={candleWidth}
+                  height={Math.max(
+                    1,
+                    Math.abs(y(candle.open) - y(candle.close)),
+                  )}
+                  className={upward ? 'candle up' : 'candle down'}
                 />
-                <text
-                  x={railEnd - 5}
-                  y={label.labelY + 3}
-                  textAnchor="end"
-                  className="price-label-text"
-                >
-                  {edgePrefix}
-                  {label.label}
-                </text>
               </g>
             );
           })}
-        </g>
-        <line
-          x1={axisStart}
-          x2={axisStart}
-          y1={padding}
-          y2={chartBottom}
-          className="price-axis-divider"
-        />
-        <g className="price-axis" aria-label="가격 눈금">
-          {priceTicks
-            .filter((value) => Math.abs(y(value) - currentPriceY) >= 12)
-            .map((value) => (
-              <g key={value}>
-                <line
-                  x1={axisStart}
-                  x2={axisStart + 5}
-                  y1={y(value)}
-                  y2={y(value)}
-                  className="price-axis-tick"
+          {layers.volumeProfile &&
+            volumeLevels
+              .filter((level) => isPriceOnScale(level.value))
+              .map((level) => (
+                <g key={level.label}>
+                  <line
+                    x1={padding}
+                    x2={plotRight}
+                    y1={y(level.value)}
+                    y2={y(level.value)}
+                    className={`level ${level.label.toLowerCase()}`}
+                  />
+                </g>
+              ))}
+          {layers.structure &&
+            structurePivots.map((pivot) => (
+              <g
+                key={`${pivot.kind}-${pivot.index}`}
+                className={`structure-marker ${pivot.kind}`}
+              >
+                <circle
+                  cx={x(pivot.index - offset)}
+                  cy={y(pivot.price)}
+                  r="2.5"
                 />
                 <text
-                  x={width - padding - 4}
-                  y={y(value) + 3}
-                  textAnchor="end"
-                  className="price-axis-text"
+                  x={x(pivot.index - offset)}
+                  y={y(pivot.price) + (pivot.kind === 'high' ? -10 : 17)}
+                  textAnchor="middle"
+                  className="structure"
                 >
-                  {formatAxisPrice(value, market)}
+                  {pivot.label}
+                </text>
+                <title>{`${pivot.label} · ${formatPrice(pivot.price, market)} · ${data[pivot.index]?.date.slice(0, 16) ?? ''}`}</title>
+              </g>
+            ))}
+          {layers.liquidity &&
+            scaledLiquidity.map((level) => (
+              <g key={`${level.kind}-${level.index}`}>
+                <line
+                  x1={Math.max(padding, x(Math.max(0, level.index - offset)))}
+                  x2={plotRight}
+                  y1={y(level.price)}
+                  y2={y(level.price)}
+                  className={`liquidity-level ${level.kind === 'BUY_SIDE' ? 'buy-side' : 'sell-side'}`}
+                />
+                <text
+                  x={padding + 4}
+                  y={y(level.price) - 4}
+                  className="liquidity-label"
+                >
+                  {level.kind === 'BUY_SIDE' ? 'BSL' : 'SSL'} ×{level.touches}
                 </text>
               </g>
             ))}
-          <g className={`current-price-badge ${currentPriceDirection}`}>
-            <rect
-              x={axisStart + 3}
-              y={currentPriceY - 9}
-              width={width - padding - axisStart - 3}
-              height="18"
-              rx="2"
-            />
-            <text
-              x={width - padding - 4}
-              y={currentPriceY + 3}
-              textAnchor="end"
-            >
-              {formatAxisPrice(currentPrice, market)}
-            </text>
-            <title>{`현재가 ${formatPrice(currentPrice, market)}`}</title>
+          <line
+            x1={plotRight + 7}
+            x2={plotRight + 7}
+            y1={padding}
+            y2={chartBottom}
+            className="price-rail-divider"
+          />
+          <g className="price-label-rail">
+            {priceLabels.map((label) => {
+              const edgePrefix =
+                label.edge === 'above'
+                  ? '↑ '
+                  : label.edge === 'below'
+                    ? '↓ '
+                    : '';
+              const railStart = plotRight + 14;
+              const railEnd = axisStart - 9;
+              return (
+                <g key={label.key} className={`price-label-item ${label.tone}`}>
+                  <path
+                    d={`M ${plotRight - 3} ${label.lineY} L ${railStart - 5} ${label.labelY} L ${railStart} ${label.labelY}`}
+                    className="price-label-connector"
+                  />
+                  <rect
+                    x={railStart}
+                    y={label.labelY - 9}
+                    width={railEnd - railStart}
+                    height="18"
+                    rx="3"
+                    className="price-label-badge"
+                  />
+                  <text
+                    x={railEnd - 5}
+                    y={label.labelY + 3}
+                    textAnchor="end"
+                    className="price-label-text"
+                  >
+                    {edgePrefix}
+                    {label.label}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+          <line
+            x1={axisStart}
+            x2={axisStart}
+            y1={padding}
+            y2={chartBottom}
+            className="price-axis-divider"
+          />
+          <g className="price-axis" aria-label="가격 눈금">
+            {priceTicks
+              .filter((value) => Math.abs(y(value) - currentPriceY) >= 12)
+              .map((value) => (
+                <g key={value}>
+                  <line
+                    x1={axisStart}
+                    x2={axisStart + 5}
+                    y1={y(value)}
+                    y2={y(value)}
+                    className="price-axis-tick"
+                  />
+                  <text
+                    x={width - padding - 4}
+                    y={y(value) + 3}
+                    textAnchor="end"
+                    className="price-axis-text"
+                  >
+                    {formatAxisPrice(value, market)}
+                  </text>
+                </g>
+              ))}
+            <g className={`current-price-badge ${currentPriceDirection}`}>
+              <rect
+                x={axisStart + 3}
+                y={currentPriceY - 9}
+                width={width - padding - axisStart - 3}
+                height="18"
+                rx="2"
+              />
+              <text
+                x={width - padding - 4}
+                y={currentPriceY + 3}
+                textAnchor="end"
+              >
+                {formatAxisPrice(currentPrice, market)}
+              </text>
+              <title>{`현재가 ${formatPrice(currentPrice, market)}`}</title>
+            </g>
           </g>
         </g>
       </svg>
