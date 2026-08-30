@@ -139,7 +139,7 @@ export async function GET(request: Request) {
       errors,
       source: 'Yahoo Finance chart feed',
       fetchedAt: new Date().toISOString(),
-      refreshAfterSeconds: 15,
+      refreshAfterSeconds: 5,
     },
     {
       status: quotes.length ? 200 : 502,

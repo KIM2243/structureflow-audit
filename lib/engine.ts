@@ -38,6 +38,20 @@ export type LiquidityLevel = {
   touches: number;
 };
 
+export type ForecastReason = {
+  label: string;
+  state: 'PASS' | 'WAIT' | 'RISK';
+  detail: string;
+};
+
+export type EntryForecast = {
+  status: 'READY' | 'WAIT' | 'AVOID';
+  side: 'LONG' | 'SHORT' | 'NEUTRAL';
+  trigger: number;
+  distancePct: number;
+  reasons: ForecastReason[];
+};
+
 export type Analysis = {
   score: number;
   bias: 'LONG' | 'SHORT' | 'NEUTRAL';
@@ -61,6 +75,7 @@ export type Analysis = {
   orderBlocks: StructureZone[];
   fairValueGaps: StructureZone[];
   liquidity: LiquidityLevel[];
+  entryForecast: EntryForecast;
 };
 
 export type BacktestDirection = 'LONG' | 'SHORT' | 'BOTH';
@@ -115,6 +130,9 @@ const average = (values: number[]) =>
   values.length
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : 0;
+
+const formatEnginePrice = (value: number) =>
+  value >= 1_000 ? Math.round(value).toLocaleString('en-US') : value.toFixed(2);
 
 export function atr(data: Candle[], period = 14) {
   const ranges = data.map((candle, index) =>
@@ -450,7 +468,9 @@ export function analyze(data: Candle[]): Analysis {
   const location =
     bias === 'LONG'
       ? close >= valueAreaLow && close <= pointOfControl
-      : close <= valueAreaHigh && close >= pointOfControl;
+      : bias === 'SHORT'
+        ? close <= valueAreaHigh && close >= pointOfControl
+        : false;
   const score = Math.max(
     35,
     Math.min(
@@ -462,6 +482,36 @@ export function analyze(data: Candle[]): Analysis {
     ),
   );
   const zones = detectZones(data);
+  const movingAverage20 = average(
+    data.slice(-20).map((candle) => candle.close),
+  );
+  const averageVolume20 = average(
+    data.slice(-20).map((candle) => candle.volume),
+  );
+  const volumeRatio = averageVolume20
+    ? data.at(-1)!.volume / averageVolume20
+    : 0;
+  const trendAligned =
+    bias === 'LONG'
+      ? close >= movingAverage20
+      : bias === 'SHORT'
+        ? close <= movingAverage20
+        : false;
+  const entryMidpoint = average(entry);
+  const distancePct = close ? ((entryMidpoint - close) / close) * 100 : 0;
+  const entryStatus =
+    bias === 'NEUTRAL' || rewardToRisk < 1.5
+      ? 'AVOID'
+      : location && trendAligned && rewardToRisk >= 2
+        ? 'READY'
+        : 'WAIT';
+  const snapshots = {
+    '1D': snapshot(resample(data, 78)),
+    '4H': snapshot(resample(data, 48)),
+    '1H': snapshot(resample(data, 12)),
+    '15m': snapshot(resample(data, 3)),
+    '5m': snapshot(data),
+  };
 
   return {
     score: Math.round(score),
@@ -481,16 +531,49 @@ export function analyze(data: Candle[]): Analysis {
     stop,
     target,
     rr: rewardToRisk,
-    snapshots: {
-      '1D': snapshot(resample(data, 26)),
-      '4H': snapshot(resample(data, 16)),
-      '1H': snapshot(resample(data, 4)),
-      '15m': snapshot(data),
-    },
+    snapshots,
     confidence: Math.min(95, 55 + Math.round(data.length / 8)),
     orderBlocks: zones.orderBlocks,
     fairValueGaps: zones.fairValueGaps,
     liquidity: detectLiquidity(structure, currentAtr),
+    entryForecast: {
+      status: entryStatus,
+      side: bias,
+      trigger: entryMidpoint,
+      distancePct,
+      reasons: [
+        {
+          label: '시장 구조',
+          state: bias === 'NEUTRAL' ? 'WAIT' : 'PASS',
+          detail:
+            bias === 'NEUTRAL'
+              ? '상승·하락 피벗 우위가 아직 없습니다.'
+              : `${bias} 구조 우위 · 상승 ${bullish} / 하락 ${bearish}`,
+        },
+        {
+          label: '진입 위치',
+          state: location ? 'PASS' : 'WAIT',
+          detail: location
+            ? '현재가가 Value Area의 유리한 진입 측에 있습니다.'
+            : `예측 구간까지 현재가 대비 ${distancePct >= 0 ? '+' : ''}${distancePct.toFixed(2)}% 이동이 필요합니다.`,
+        },
+        {
+          label: '20봉 추세',
+          state: trendAligned ? 'PASS' : 'WAIT',
+          detail: `${formatEnginePrice(close)} / 20MA ${formatEnginePrice(movingAverage20)} · ${trendAligned ? '방향 일치' : '확인 대기'}`,
+        },
+        {
+          label: '거래량',
+          state: volumeRatio >= 1.1 ? 'PASS' : 'WAIT',
+          detail: `최근 거래량은 20봉 평균의 ${volumeRatio.toFixed(2)}배입니다.`,
+        },
+        {
+          label: '손익비',
+          state: rewardToRisk >= 2 ? 'PASS' : 'RISK',
+          detail: `예상 목표까지 ${rewardToRisk.toFixed(2)}R · ${rewardToRisk >= 2 ? '기준 충족' : '2R 미달'}`,
+        },
+      ],
+    },
   };
 }
 

@@ -50,8 +50,13 @@ import {
 } from '@/lib/engine';
 
 type Market = 'US' | 'KR';
-type Timeframe = '15m' | '1H' | '4H' | '1D';
-type LayerKey = 'structure' | 'volumeProfile' | 'orderflow' | 'liquidity';
+type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
+type LayerKey =
+  | 'structure'
+  | 'volumeProfile'
+  | 'orderflow'
+  | 'liquidity'
+  | 'forecast';
 
 type SymbolItem = {
   code: string;
@@ -124,13 +129,15 @@ const DEFAULT_WATCHLIST: WatchlistEntry[] = [
 ];
 
 const timeframeSizes: Record<Timeframe, number> = {
-  '15m': 1,
-  '1H': 4,
-  '4H': 16,
-  '1D': 26,
+  '5m': 1,
+  '15m': 3,
+  '1H': 12,
+  '4H': 48,
+  '1D': 78,
 };
 
 const timeframeLabels: Record<Timeframe, string> = {
+  '5m': '5분봉',
   '15m': '15분봉',
   '1H': '1시간봉',
   '4H': '4시간봉',
@@ -138,13 +145,14 @@ const timeframeLabels: Record<Timeframe, string> = {
 };
 
 const timeframeButtonLabels: Record<Timeframe, string> = {
+  '5m': '5분',
   '15m': '15분',
   '1H': '1시간',
   '4H': '4시간',
   '1D': '일봉',
 };
 
-const backtestTimeframes: Timeframe[] = ['15m', '1H', '4H', '1D'];
+const backtestTimeframes: Timeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 const DEFAULT_PREFERENCES: Preferences = {
   capital: 10_000,
@@ -212,7 +220,7 @@ function mergeLiveCandle(candles: Candle[], quote: LiveQuote) {
   const lastTime = Date.parse(candles.at(-1)!.date);
   if (!Number.isFinite(quoteTime) || !Number.isFinite(lastTime)) return candles;
 
-  const bucketMs = 15 * 60 * 1_000;
+  const bucketMs = 5 * 60 * 1_000;
   const quoteBucket = Math.floor(quoteTime / bucketMs) * bucketMs;
   const lastBucket = Math.floor(lastTime / bucketMs) * bucketMs;
   if (quoteBucket < lastBucket) return candles;
@@ -249,7 +257,7 @@ function mergeLiveCandle(candles: Candle[], quote: LiveQuote) {
 function formatLookbackDuration(bars: number, timeframe: Timeframe) {
   if (timeframe === '1D') return `${bars}거래일`;
 
-  const minutes = bars * timeframeSizes[timeframe] * 15;
+  const minutes = bars * timeframeSizes[timeframe] * 5;
   if (minutes < 60) return `${minutes}분`;
 
   const hours = Math.floor(minutes / 60);
@@ -299,7 +307,7 @@ function demo(base = 10, count = 1_200): Candle[] {
     const low = Math.min(open, close) - base * (0.006 + (index % 5) * 0.0004);
     last = close;
     return {
-      date: new Date(Date.now() - (count - index) * 900_000).toISOString(),
+      date: new Date(Date.now() - (count - index) * 300_000).toISOString(),
       open,
       high,
       low,
@@ -408,11 +416,17 @@ function PriceChart({
     ...(layers.volumeProfile ? [analysis.vah] : []),
     ...(layers.orderflow ? visibleZones.map((zone) => zone.high) : []),
     ...(layers.liquidity ? analysis.liquidity.map((level) => level.price) : []),
+    ...(layers.forecast
+      ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
+      : []),
   ];
   const extraLows = [
     ...(layers.volumeProfile ? [analysis.val] : []),
     ...(layers.orderflow ? visibleZones.map((zone) => zone.low) : []),
     ...(layers.liquidity ? analysis.liquidity.map((level) => level.price) : []),
+    ...(layers.forecast
+      ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
+      : []),
   ];
   const maximum = Math.max(
     ...displayed.map((candle) => candle.high),
@@ -444,6 +458,13 @@ function PriceChart({
         {layers.liquidity && (
           <span className="soft">Liquidity · {analysis.liquidity.length}</span>
         )}
+        {layers.forecast && (
+          <span
+            className={`forecast-badge ${analysis.entryForecast.status.toLowerCase()}`}
+          >
+            진입 예측 · {analysis.entryForecast.status}
+          </span>
+        )}
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -469,6 +490,65 @@ function PriceChart({
             className="gridline"
           />
         ))}
+        {layers.forecast && (
+          <g className="entry-forecast-layer">
+            <rect
+              x={x(Math.max(0, displayed.length - 46))}
+              y={Math.min(y(analysis.entry[0]), y(analysis.entry[1]))}
+              width={width - padding - x(Math.max(0, displayed.length - 46))}
+              height={Math.max(
+                2,
+                Math.abs(y(analysis.entry[0]) - y(analysis.entry[1])),
+              )}
+              className="entry-forecast-zone"
+            />
+            <line
+              x1={x(Math.max(0, displayed.length - 46))}
+              x2={width - padding}
+              y1={y(analysis.entryForecast.trigger)}
+              y2={y(analysis.entryForecast.trigger)}
+              className="entry-trigger-line"
+            />
+            <line
+              x1={x(Math.max(0, displayed.length - 46))}
+              x2={width - padding}
+              y1={y(analysis.stop)}
+              y2={y(analysis.stop)}
+              className="entry-invalidation-line"
+            />
+            <line
+              x1={x(Math.max(0, displayed.length - 46))}
+              x2={width - padding}
+              y1={y(analysis.target)}
+              y2={y(analysis.target)}
+              className="entry-target-line"
+            />
+            <text
+              x={width - padding - 4}
+              y={y(analysis.entryForecast.trigger) - 5}
+              textAnchor="end"
+              className="entry-forecast-label"
+            >
+              예측 진입 {formatPrice(analysis.entryForecast.trigger, market)}
+            </text>
+            <text
+              x={width - padding - 4}
+              y={y(analysis.stop) - 5}
+              textAnchor="end"
+              className="entry-invalidation-label"
+            >
+              무효화 {formatPrice(analysis.stop, market)}
+            </text>
+            <text
+              x={width - padding - 4}
+              y={y(analysis.target) - 5}
+              textAnchor="end"
+              className="entry-target-label"
+            >
+              목표 {formatPrice(analysis.target, market)}
+            </text>
+          </g>
+        )}
         {layers.orderflow &&
           visibleZones.map((zone) => {
             const start = Math.max(0, zone.startIndex - offset);
@@ -902,12 +982,13 @@ export default function Home() {
   const [data, setData] = useState<Candle[]>(() => demo());
   const [status, setStatus] = useState('예시 데이터 · 종목을 불러오세요');
   const [loading, setLoading] = useState(false);
-  const [timeframe, setTimeframe] = useState<Timeframe>('15m');
+  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     structure: true,
     volumeProfile: true,
     orderflow: false,
     liquidity: false,
+    forecast: true,
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -928,9 +1009,9 @@ export default function Home() {
   const [lookback, setLookback] = useState(20);
   const [rewardRisk, setRewardRisk] = useState(2);
   const [direction, setDirection] = useState<BacktestDirection>('BOTH');
-  const [backtestTimeframe, setBacktestTimeframe] = useState<Timeframe>('15m');
+  const [backtestTimeframe, setBacktestTimeframe] = useState<Timeframe>('5m');
   const [appliedBacktestTimeframe, setAppliedBacktestTimeframe] =
-    useState<Timeframe>('15m');
+    useState<Timeframe>('5m');
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [appliedBacktest, setAppliedBacktest] = useState<BacktestOptions>(
     () => ({
@@ -1080,7 +1161,7 @@ export default function Home() {
     }, 0);
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refreshLiveQuotes();
-    }, 15_000);
+    }, 5_000);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
@@ -1168,7 +1249,7 @@ export default function Home() {
       if (candles.length < 20) throw new Error('최소 20개 캔들이 필요합니다.');
       setData(candles);
       setLoadedFeed(null);
-      setTimeframe('15m');
+      setTimeframe('5m');
       setStatus(
         `${file.name} · ${candles.length.toLocaleString()}개 캔들 · 계산 완료`,
       );
@@ -1292,6 +1373,7 @@ export default function Home() {
     { key: 'volumeProfile', label: 'VP' },
     { key: 'orderflow', label: 'OB/FVG' },
     { key: 'liquidity', label: '유동성' },
+    { key: 'forecast', label: '진입예측' },
   ];
 
   return (
@@ -1476,7 +1558,7 @@ export default function Home() {
           <button type="button" onClick={openWatchlistSettings}>
             <Settings2 size={14} /> 종목 설정
           </button>
-          <small>15초 자동 갱신 · 제공처 지연 가능</small>
+          <small>5초 자동 갱신 · 제공처 지연 가능</small>
         </div>
       </section>
 
@@ -1498,25 +1580,28 @@ export default function Home() {
                 {timeframe}
               </div>
               <h1>
-                {analysis.score >= 75
-                  ? '확인 진입 후보'
-                  : analysis.score >= 60
-                    ? '조건 충족 대기'
-                    : '관망'}
+                {analysis.entryForecast.status === 'READY'
+                  ? '진입 조건 충족'
+                  : analysis.entryForecast.status === 'WAIT'
+                    ? '예측 구간 대기'
+                    : '진입 보류'}
               </h1>
               <p>
-                {baseAnalysis.snapshots[timeframe].event} 확인 · 선택 시간대
-                기준
+                {baseAnalysis.snapshots[timeframe].event} ·
+                구조·위치·추세·손익비 조건부 예측
               </p>
             </div>
             <div className="metric">
-              <small>진입 후보</small>
+              <small>예측 진입 구간</small>
               <strong>
                 {current.currency}
                 {formatPrice(analysis.entry[0], market)} –{' '}
                 {formatPrice(analysis.entry[1], market)}
               </strong>
-              <span>Value Area 경계</span>
+              <span>
+                현재가 대비 {analysis.entryForecast.distancePct >= 0 ? '+' : ''}
+                {analysis.entryForecast.distancePct.toFixed(2)}%
+              </span>
             </div>
             <div className="metric danger">
               <small>손절 / 무효화</small>
@@ -1678,19 +1763,47 @@ export default function Home() {
                   <i /> CALCULATED
                 </small>
               </div>
-              <article className="plan early">
+              <article className="plan early forecast-plan">
                 <header>
                   <span>
-                    <Zap size={15} /> 조기 진입
+                    <Zap size={15} /> 조건부 진입 예측
                   </span>
-                  <b>{preferences.riskPct.toFixed(1)}% RISK</b>
+                  <b
+                    className={`forecast-status ${analysis.entryForecast.status.toLowerCase()}`}
+                  >
+                    {analysis.entryForecast.status === 'READY'
+                      ? '조건 충족'
+                      : analysis.entryForecast.status === 'WAIT'
+                        ? '대기'
+                        : '보류'}
+                  </b>
                 </header>
                 <h3>
                   {current.currency}
                   {formatPrice(analysis.entry[0], market)} –{' '}
                   {formatPrice(analysis.entry[1], market)}
                 </h3>
-                <p>Value Area + swing location</p>
+                <p>구조 + Value Area + 20봉 추세 + ATR 기반</p>
+                <ul className="forecast-reasons">
+                  {analysis.entryForecast.reasons.map((reason) => (
+                    <li
+                      key={reason.label}
+                      className={reason.state.toLowerCase()}
+                    >
+                      <div>
+                        <span>{reason.label}</span>
+                        <b>
+                          {reason.state === 'PASS'
+                            ? '충족'
+                            : reason.state === 'RISK'
+                              ? '위험'
+                              : '대기'}
+                        </b>
+                      </div>
+                      <p>{reason.detail}</p>
+                    </li>
+                  ))}
+                </ul>
                 <dl>
                   <div>
                     <dt>손절</dt>
@@ -1744,8 +1857,9 @@ export default function Home() {
               <div className="warning">
                 <CircleAlert size={16} />
                 <p>
-                  <strong>리스크 원칙</strong> 자동 계산 결과를 주문 전 원본
-                  차트에서 검증하세요.
+                  <strong>예측 해석</strong> 조건 충족 가능 위치이며 미래
+                  가격이나 체결을 보장하지 않습니다. 주문 전 원본 차트에서
+                  검증하세요.
                 </p>
               </div>
               <div className="score-list">
@@ -1792,7 +1906,7 @@ export default function Home() {
                 ))}
               </div>
               <span>
-                원본 15분봉을 {timeframeLabels[backtestTimeframe]}으로 묶어 계산
+                원본 5분봉을 {timeframeLabels[backtestTimeframe]}으로 묶어 계산
                 · 사용 가능 {draftBacktestData.length.toLocaleString()}봉
               </span>
             </div>
@@ -2161,7 +2275,7 @@ export default function Home() {
           <div className="watchlist-notice">
             <Wifi size={16} />
             <div>
-              <strong>15초 자동 갱신</strong>
+              <strong>5초 자동 갱신</strong>
               <p>
                 데이터 제공처의 무료 시세를 사용하므로 거래소 상황에 따라 지연될
                 수 있습니다.

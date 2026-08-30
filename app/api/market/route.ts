@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const endpoint = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=60d&interval=15m&includePrePost=false&events=div%2Csplits`;
+    const endpoint = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=60d&interval=5m&includePrePost=false&events=div%2Csplits`;
     const response = await fetch(endpoint, {
       headers: { 'User-Agent': 'Mozilla/5.0 StructureFlow/1.0' },
     });
