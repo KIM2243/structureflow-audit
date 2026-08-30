@@ -1008,10 +1008,7 @@ function PriceChart({
               >
                 {pivot.label}
               </text>
-              <title>
-                {pivot.label} · {formatPrice(pivot.price, market)} ·{' '}
-                {data[pivot.index]?.date.slice(0, 16)}
-              </title>
+              <title>{`${pivot.label} · ${formatPrice(pivot.price, market)} · ${data[pivot.index]?.date.slice(0, 16) ?? ''}`}</title>
             </g>
           ))}
         {layers.liquidity &&
