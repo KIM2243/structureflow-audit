@@ -64,6 +64,7 @@ type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
   | 'structure'
+  | 'premiumDiscount'
   | 'internalStructure'
   | 'volume'
   | 'volumeProfile'
@@ -1113,7 +1114,7 @@ function PriceChart({
             height={chartBottom - padding}
             className="price-axis-background"
           />
-          {layers.structure && (
+          {layers.premiumDiscount && (
             <g className="premium-discount-layer" aria-label="프리미엄 디스카운트 영역">
               <rect
                 x={padding}
@@ -1881,6 +1882,7 @@ export default function Home() {
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     structure: true,
+    premiumDiscount: true,
     internalStructure: true,
     volume: true,
     volumeProfile: true,
@@ -2421,6 +2423,7 @@ export default function Home() {
   );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
     { key: 'structure', label: '스윙구조' },
+    { key: 'premiumDiscount', label: 'P/D 영역' },
     { key: 'internalStructure', label: '내부구조' },
     { key: 'volume', label: '거래량' },
     { key: 'volumeProfile', label: 'VP' },
