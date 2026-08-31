@@ -26,3 +26,5 @@ http://127.0.0.1:8790/health
 - `KIWOOM_BRIDGE_TOKEN`: PC의 `.env`와 동일한 값
 
 PC, 브리지, 터널이 모두 실행 중일 때 운영 사이트가 실시간 키움 데이터를 받을 수 있습니다.
+
+`scripts/start-local-bridge.ps1`은 브리지와 Cloudflare Tunnel을 백그라운드로 함께 실행합니다. Windows 로그인 시 자동 실행 작업에 이 스크립트를 등록할 수 있습니다.
