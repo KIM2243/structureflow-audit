@@ -50,7 +50,7 @@ import {
 import {
   analyze,
   backtest,
-  resample,
+  structureSnapshot,
   type Analysis,
   type BacktestDirection,
   type BacktestOptions,
@@ -60,9 +60,12 @@ import {
 } from '@/lib/engine';
 
 type Market = 'US' | 'KR';
+type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
   | 'structure'
+  | 'internalStructure'
+  | 'volume'
   | 'volumeProfile'
   | 'orderflow'
   | 'liquidity'
@@ -73,6 +76,7 @@ type SymbolItem = {
   feed: string;
   name: string;
   currency: '$' | '₩';
+  exchange?: UsExchange;
 };
 
 type Preferences = {
@@ -88,14 +92,25 @@ type MarketResponse = {
   source?: string;
   fetchedAt?: string;
   candles?: Candle[];
+  timeframes?: Partial<Record<Timeframe, Candle[]>>;
 };
+
+type MarketDataCacheEntry = {
+  payload: MarketResponse & { candles: Candle[] };
+  cachedAt: number;
+};
+
+type HigherTimeframeData = Partial<Record<Timeframe, Candle[]>>;
 
 type WatchlistEntry = {
   market: Market;
   ticker: string;
+  exchange?: UsExchange;
 };
 
 type LiveQuote = {
+  key: string;
+  market: Market;
   symbol: string;
   name: string;
   exchange?: string;
@@ -105,14 +120,24 @@ type LiveQuote = {
   change: number;
   changePct: number;
   timestamp: string;
+  lastUpdated: string;
   marketState: string;
-  candle: Candle;
+  status: 'ok';
+};
+
+type LiveQuoteError = {
+  key: string;
+  symbol: string;
+  error: string;
+  code?: string;
+  retryable?: boolean;
+  status: 'error';
 };
 
 type QuotesResponse = {
   error?: string;
   quotes?: LiveQuote[];
-  errors?: Array<{ symbol: string; error: string }>;
+  errors?: LiveQuoteError[];
   fetchedAt?: string;
   refreshAfterSeconds?: number;
 };
@@ -121,9 +146,27 @@ type WatchedSymbol = SymbolItem & { market: Market };
 
 const symbols: Record<Market, SymbolItem[]> = {
   US: [
-    { code: 'ONDS', feed: 'ONDS', name: 'Ondas Holdings', currency: '$' },
-    { code: 'NVDA', feed: 'NVDA', name: 'NVIDIA', currency: '$' },
-    { code: 'TSLA', feed: 'TSLA', name: 'Tesla', currency: '$' },
+    {
+      code: 'ONDS',
+      feed: 'ONDS',
+      name: 'Ondas Holdings',
+      currency: '$',
+      exchange: 'ND',
+    },
+    {
+      code: 'NVDA',
+      feed: 'NVDA',
+      name: 'NVIDIA',
+      currency: '$',
+      exchange: 'ND',
+    },
+    {
+      code: 'TSLA',
+      feed: 'TSLA',
+      name: 'Tesla',
+      currency: '$',
+      exchange: 'ND',
+    },
   ],
   KR: [
     { code: '005930', feed: '005930.KS', name: '삼성전자', currency: '₩' },
@@ -133,10 +176,14 @@ const symbols: Record<Market, SymbolItem[]> = {
 };
 
 const DEFAULT_WATCHLIST: WatchlistEntry[] = [
-  { market: 'US', ticker: 'ONDS' },
-  { market: 'US', ticker: 'NVDA' },
-  { market: 'US', ticker: 'TSLA' },
+  { market: 'US', ticker: 'ONDS', exchange: 'ND' },
+  { market: 'US', ticker: 'NVDA', exchange: 'ND' },
+  { market: 'US', ticker: 'TSLA', exchange: 'ND' },
 ];
+
+const MAX_WATCHLIST_SIZE = 3;
+const LIVE_QUOTE_STALE_MS = 15_000;
+const MARKET_DATA_CACHE_TTL_MS = 30_000;
 
 const timeframeSizes: Record<Timeframe, number> = {
   '5m': 1,
@@ -145,6 +192,40 @@ const timeframeSizes: Record<Timeframe, number> = {
   '4H': 48,
   '1D': 78,
 };
+
+function resampleBySession(data: Candle[], size: number) {
+  if (size <= 1) return data;
+  const output: Candle[] = [];
+  let sessionDate = '';
+  let session: Candle[] = [];
+
+  const flushSession = () => {
+    for (let index = 0; index < session.length; index += size) {
+      const group = session.slice(index, index + size);
+      if (!group.length) continue;
+      output.push({
+        date: group.at(-1)!.date,
+        open: group[0].open,
+        high: Math.max(...group.map((candle) => candle.high)),
+        low: Math.min(...group.map((candle) => candle.low)),
+        close: group.at(-1)!.close,
+        volume: group.reduce((sum, candle) => sum + candle.volume, 0),
+      });
+    }
+  };
+
+  for (const candle of data) {
+    const candleSessionDate = candle.date.slice(0, 10);
+    if (sessionDate && candleSessionDate !== sessionDate) {
+      flushSession();
+      session = [];
+    }
+    sessionDate = candleSessionDate;
+    session.push(candle);
+  }
+  flushSession();
+  return output;
+}
 
 const timeframeLabels: Record<Timeframe, string> = {
   '5m': '5분봉',
@@ -213,12 +294,14 @@ function normalizeWatchlistEntry(entry: WatchlistEntry): WatchedSymbol | null {
   if (entry.market === 'US') {
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) return null;
     const known = symbols.US.find((item) => item.feed === ticker);
+    const exchange = entry.exchange || known?.exchange || 'ND';
     return {
       market: 'US',
       code: ticker,
       feed: ticker,
       name: known?.name || ticker,
       currency: '$',
+      exchange,
     };
   }
 
@@ -242,7 +325,7 @@ function loadWatchlist() {
       window.localStorage.getItem('structureflow:watchlist') || '[]',
     ) as WatchlistEntry[];
     const valid = saved
-      .slice(0, 3)
+      .slice(0, MAX_WATCHLIST_SIZE)
       .filter((entry) => normalizeWatchlistEntry(entry));
     return valid.length ? valid : DEFAULT_WATCHLIST;
   } catch {
@@ -255,47 +338,7 @@ function marketStateLabel(state: string) {
   if (state === 'PRE') return '프리마켓';
   if (state === 'POST' || state === 'POSTPOST') return '애프터마켓';
   if (state === 'CLOSED') return '장 종료';
-  return '시세 수신';
-}
-
-function mergeLiveCandle(candles: Candle[], quote: LiveQuote) {
-  if (!candles.length) return candles;
-  const quoteTime = Date.parse(quote.timestamp);
-  const lastTime = Date.parse(candles.at(-1)!.date);
-  if (!Number.isFinite(quoteTime) || !Number.isFinite(lastTime)) return candles;
-
-  const bucketMs = 5 * 60 * 1_000;
-  const quoteBucket = Math.floor(quoteTime / bucketMs) * bucketMs;
-  const lastBucket = Math.floor(lastTime / bucketMs) * bucketMs;
-  if (quoteBucket < lastBucket) return candles;
-
-  const liveHigh = Math.max(quote.price, quote.candle.high);
-  const liveLow = Math.min(quote.price, quote.candle.low);
-  if (quoteBucket === lastBucket) {
-    const next = [...candles];
-    const last = next.at(-1)!;
-    next[next.length - 1] = {
-      ...last,
-      high: Math.max(last.high, liveHigh),
-      low: Math.min(last.low, liveLow),
-      close: quote.price,
-      volume: Math.max(last.volume, quote.candle.volume),
-    };
-    return next;
-  }
-
-  const previousClose = candles.at(-1)!.close;
-  return [
-    ...candles.slice(-1_999),
-    {
-      date: new Date(quoteBucket).toISOString(),
-      open: previousClose,
-      high: Math.max(previousClose, liveHigh),
-      low: Math.min(previousClose, liveLow),
-      close: quote.price,
-      volume: quote.candle.volume,
-    },
-  ];
+  return '정상';
 }
 
 function formatLookbackDuration(bars: number, timeframe: Timeframe) {
@@ -340,6 +383,8 @@ function loadPreferences(): Preferences {
   }
 }
 
+const DEMO_END_TIMESTAMP = Date.UTC(2025, 0, 2, 0, 0, 0);
+
 function demo(base = 10, count = 1_200): Candle[] {
   let last = base * 0.7;
   return Array.from({ length: count }, (_, index) => {
@@ -351,7 +396,9 @@ function demo(base = 10, count = 1_200): Candle[] {
     const low = Math.min(open, close) - base * (0.006 + (index % 5) * 0.0004);
     last = close;
     return {
-      date: new Date(Date.now() - (count - index) * 300_000).toISOString(),
+      date: new Date(
+        DEMO_END_TIMESTAMP - (count - index) * 300_000,
+      ).toISOString(),
       open,
       high,
       low,
@@ -365,6 +412,37 @@ const formatPrice = (value: number, market: Market) =>
   market === 'KR'
     ? Math.round(value).toLocaleString('ko-KR')
     : value.toFixed(2);
+
+function formatVolume(value: number) {
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return Math.round(value).toLocaleString('en-US');
+}
+
+function liveQuoteKey(
+  item: Pick<WatchedSymbol, 'market' | 'code' | 'exchange'>,
+) {
+  return item.market === 'KR'
+    ? `KR:${item.code}`
+    : `US:${item.exchange || 'ND'}:${item.code}`;
+}
+
+function liveQuoteStatus(
+  quote: LiveQuote | undefined,
+  error: LiveQuoteError | undefined,
+) {
+  if (error) return quote ? '일시 오류' : '오류';
+  if (!quote) return '로딩 중';
+  const updatedAt = Date.parse(quote.lastUpdated || quote.timestamp);
+  if (
+    Number.isFinite(updatedAt) &&
+    Date.now() - updatedAt > LIVE_QUOTE_STALE_MS
+  ) {
+    return '오래됨';
+  }
+  return marketStateLabel(quote.marketState);
+}
 
 const formatMoney = (value: number, market: Market) =>
   market === 'KR'
@@ -419,8 +497,9 @@ function downloadTextFile(filename: string, content: string) {
 const formatTradeDate = (value: string) => value.slice(0, 16).replace('T', ' ');
 
 const DEFAULT_CHART_BARS = 120;
+const HIGHER_TIMEFRAME_CHART_BARS = 200;
 const MIN_CHART_BARS = 18;
-const MAX_CHART_BARS = 360;
+const MAX_CHART_BARS = 200;
 
 function clampChartValue(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -471,8 +550,10 @@ function layoutChartPriceLabels(
   priceToY: (value: number) => number,
   top: number,
   bottom: number,
+  avoidY?: number,
 ) {
-  const gap = 19;
+  const gap = 22;
+  const avoidGap = 25;
   const positioned = labels
     .map((label) => {
       const rawY = priceToY(label.value);
@@ -491,24 +572,40 @@ function layoutChartPriceLabels(
     })
     .sort((left, right) => left.labelY - right.labelY);
 
-  for (let index = 1; index < positioned.length; index += 1) {
-    positioned[index].labelY = Math.max(
-      positioned[index].labelY,
-      positioned[index - 1].labelY + gap,
-    );
-  }
-  if (positioned.at(-1)?.labelY && positioned.at(-1)!.labelY > bottom) {
-    positioned[positioned.length - 1].labelY = bottom;
-    for (let index = positioned.length - 2; index >= 0; index -= 1) {
-      positioned[index].labelY = Math.min(
+  const normalize = () => {
+    for (let index = 1; index < positioned.length; index += 1) {
+      positioned[index].labelY = Math.max(
         positioned[index].labelY,
-        positioned[index + 1].labelY - gap,
+        positioned[index - 1].labelY + gap,
       );
     }
-  }
-  if (positioned[0]?.labelY < top) {
-    const shift = top - positioned[0].labelY;
-    for (const label of positioned) label.labelY += shift;
+    if (positioned.at(-1)?.labelY && positioned.at(-1)!.labelY > bottom) {
+      positioned[positioned.length - 1].labelY = bottom;
+      for (let index = positioned.length - 2; index >= 0; index -= 1) {
+        positioned[index].labelY = Math.min(
+          positioned[index].labelY,
+          positioned[index + 1].labelY - gap,
+        );
+      }
+    }
+    if (positioned[0]?.labelY < top) {
+      const shift = top - positioned[0].labelY;
+      for (const label of positioned) label.labelY += shift;
+    }
+  };
+
+  normalize();
+  if (avoidY !== undefined) {
+    for (const label of positioned) {
+      if (Math.abs(label.labelY - avoidY) >= avoidGap) continue;
+      const direction = label.rawY <= avoidY ? -1 : 1;
+      label.labelY = clampChartValue(
+        avoidY + direction * avoidGap,
+        top,
+        bottom,
+      );
+    }
+    normalize();
   }
   return positioned;
 }
@@ -568,7 +665,11 @@ function PriceChart({
   layers: Record<LayerKey, boolean>;
   seriesKey: string;
 }) {
-  const defaultBars = Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length));
+  const defaultTargetBars =
+    timeframe === '1H' || timeframe === '4H' || timeframe === '1D'
+      ? HIGHER_TIMEFRAME_CHART_BARS
+      : DEFAULT_CHART_BARS;
+  const defaultBars = Math.min(defaultTargetBars, Math.max(1, data.length));
   const [viewport, setViewport] = useState({
     bars: defaultBars,
     end: data.length,
@@ -593,7 +694,7 @@ function PriceChart({
     setViewport((previous) => {
       if (seriesChanged) {
         return {
-          bars: Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length)),
+          bars: Math.min(defaultTargetBars, Math.max(1, data.length)),
           end: data.length,
         };
       }
@@ -606,7 +707,7 @@ function PriceChart({
         : clampChartValue(previous.end, bars, data.length);
       return { bars, end };
     });
-  }, [data.length, seriesKey]);
+  }, [data.length, defaultTargetBars, seriesKey]);
 
   const maximumBars = Math.min(MAX_CHART_BARS, Math.max(1, data.length));
   const minimumBars = Math.min(MIN_CHART_BARS, maximumBars);
@@ -648,7 +749,7 @@ function PriceChart({
 
   const resetViewport = () => {
     setViewport({
-      bars: Math.min(DEFAULT_CHART_BARS, Math.max(1, data.length)),
+      bars: Math.min(defaultTargetBars, Math.max(1, data.length)),
       end: data.length,
     });
   };
@@ -733,13 +834,18 @@ function PriceChart({
   };
 
   const width = 900;
-  const height = 350;
+  const height = 430;
   const padding = 28;
-  const labelRailWidth = 190;
-  const axisWidth = 56;
+  // Keep the chart body, annotation rail, and price axis as separate columns.
+  // The extra axis breathing room prevents the live price badge from visually
+  // intruding into the annotation table at the right edge of the chart.
+  const labelRailWidth = 200;
+  const axisWidth = 66;
   const plotRight = width - padding - labelRailWidth;
   const axisStart = width - padding - axisWidth;
-  const chartBottom = height - padding;
+  const volumeBottom = height - padding;
+  const volumeTop = volumeBottom - 70;
+  const chartBottom = layers.volume ? volumeTop - 20 : height - padding;
   const visibleZones = [
     ...analysis.orderBlocks,
     ...analysis.fairValueGaps,
@@ -797,6 +903,23 @@ function PriceChart({
   const currentPriceDirection =
     latestVisibleCandle.close >= latestVisibleCandle.open ? 'up' : 'down';
   const profileMaximum = Math.max(...analysis.profile, 1);
+  const volumeMaximum = Math.max(
+    ...displayed.map((candle) => candle.volume),
+    1,
+  );
+  const volumeY = (value: number) =>
+    volumeBottom - (value / volumeMaximum) * (volumeBottom - volumeTop);
+  const visibleVolumeAverages = displayed.map((_, index) => {
+    const sourceIndex = offset + index;
+    const sample = data.slice(Math.max(0, sourceIndex - 19), sourceIndex + 1);
+    return (
+      sample.reduce((sum, candle) => sum + candle.volume, 0) /
+      Math.max(sample.length, 1)
+    );
+  });
+  const volumeAveragePath = visibleVolumeAverages
+    .map((value, index) => `${index ? 'L' : 'M'} ${x(index)} ${volumeY(value)}`)
+    .join(' ');
   const volumeLevels = [
     { value: analysis.vah, label: 'VAH' },
     { value: analysis.poc, label: 'POC' },
@@ -838,6 +961,7 @@ function PriceChart({
     y,
     padding + 8,
     chartBottom - 8,
+    currentPriceY,
   );
   const structurePivots = selectChartPivots(
     analysis.pivots,
@@ -845,6 +969,39 @@ function PriceChart({
     endIndex,
     displayed.length,
   );
+  const internalStructurePivots = selectChartPivots(
+    analysis.internalPivots,
+    offset,
+    endIndex,
+    Math.max(displayed.length, 80),
+  );
+  const visibleSwingMap = analysis.pivots.filter(
+    (pivot) => pivot.index >= offset && pivot.index < endIndex,
+  );
+  const visibleInternalMap = analysis.internalPivots.filter(
+    (pivot) => pivot.index >= offset && pivot.index < endIndex,
+  );
+  const swingMapPath = visibleSwingMap
+    .map(
+      (pivot, index) =>
+        `${index ? 'L' : 'M'} ${x(pivot.index - offset)} ${y(pivot.price)}`,
+    )
+    .join(' ');
+  const internalMapPath = visibleInternalMap
+    .map(
+      (pivot, index) =>
+        `${index ? 'L' : 'M'} ${x(pivot.index - offset)} ${y(pivot.price)}`,
+    )
+    .join(' ');
+  const visibleStructureEvents = analysis.structureEvents.filter(
+    (event) =>
+      event.index >= offset &&
+      event.index < endIndex &&
+      event.price >= minimum &&
+      event.price <= maximum,
+  );
+  const dealingRangeEquilibrium = (candleMaximum + candleMinimum) / 2;
+  const equilibriumY = clampedY(dealingRangeEquilibrium);
 
   return (
     <div className="chart-wrap">
@@ -855,6 +1012,27 @@ function PriceChart({
           {isViewingLatest ? '최신 구간' : `${offset + 1}–${endIndex}봉`}
         </span>
         <span className="soft">Y축 · 화면 맞춤</span>
+        {layers.structure && (
+          <span
+            className={`structure-state ${analysis.structureState.swingTrend.toLowerCase()}`}
+          >
+            Swing {analysis.structureState.swingTrend}
+          </span>
+        )}
+        {layers.internalStructure && (
+          <span
+            className={`structure-state internal ${analysis.structureState.internalTrend.toLowerCase()}`}
+          >
+            Internal {analysis.structureState.internalTrend}
+          </span>
+        )}
+        {layers.volume && (
+          <span
+            className={`volume-ratio ${analysis.volumeStats.ratio >= 1.5 ? 'surge' : ''}`}
+          >
+            RVOL {analysis.volumeStats.ratio.toFixed(2)}×
+          </span>
+        )}
         {layers.orderflow && (
           <span className="soft">
             OB/FVG · {visibleZones.filter((zone) => zone.active).length}
@@ -897,7 +1075,7 @@ function PriceChart({
           type="button"
           onClick={resetViewport}
           aria-label="차트 범위 초기화"
-          title="120봉 최신 구간으로 초기화"
+          title={`${defaultTargetBars}봉 최신 구간으로 초기화`}
         >
           <RotateCcw size={13} />
           <span className="reset-label">초기화</span>
@@ -921,6 +1099,55 @@ function PriceChart({
           key={`viewport-${seriesKey}-${offset}-${endIndex}-${visibleBars}`}
           className="chart-viewport-layer"
         >
+          <rect
+            x={plotRight + 7}
+            y={padding}
+            width={axisStart - (plotRight + 7)}
+            height={chartBottom - padding}
+            className="price-label-rail-background"
+          />
+          <rect
+            x={axisStart}
+            y={padding}
+            width={width - padding - axisStart}
+            height={chartBottom - padding}
+            className="price-axis-background"
+          />
+          {layers.structure && (
+            <g className="premium-discount-layer" aria-label="프리미엄 디스카운트 영역">
+              <rect
+                x={padding}
+                y={padding}
+                width={plotRight - padding}
+                height={Math.max(0, equilibriumY - padding)}
+                className="premium-zone"
+              />
+              <rect
+                x={padding}
+                y={equilibriumY}
+                width={plotRight - padding}
+                height={Math.max(0, chartBottom - equilibriumY)}
+                className="discount-zone"
+              />
+              <line
+                x1={padding}
+                x2={plotRight}
+                y1={equilibriumY}
+                y2={equilibriumY}
+                className="equilibrium-line"
+              />
+              <text x={padding + 8} y={padding + 14} className="premium-label">
+                PREMIUM
+              </text>
+              <text
+                x={padding + 8}
+                y={Math.min(chartBottom - 8, equilibriumY + 15)}
+                className="discount-label"
+              >
+                DISCOUNT
+              </text>
+            </g>
+          )}
           {layers.volumeProfile &&
             analysis.val <= maximum &&
             analysis.vah >= minimum && (
@@ -994,12 +1221,12 @@ function PriceChart({
             </g>
           )}
           {layers.orderflow &&
-            scaledZones.map((zone) => {
+            scaledZones.map((zone, zoneIndex) => {
               const start = Math.max(0, zone.startIndex - offset);
               const zoneClass = zone.kind.toLowerCase().replace('_', '-');
               return (
                 <g
-                  key={`${zone.kind}-${zone.startIndex}`}
+                  key={`${zone.kind}-${zone.startIndex}-${zone.endIndex}-${zoneIndex}`}
                   opacity={zone.active ? 1 : 0.35}
                 >
                   <rect
@@ -1037,6 +1264,52 @@ function PriceChart({
                   height={4}
                   className="profile-bar"
                 />
+              );
+            })}
+          {layers.structure && swingMapPath && (
+            <path d={swingMapPath} className="structure-map swing" />
+          )}
+          {layers.internalStructure && internalMapPath && (
+            <path d={internalMapPath} className="structure-map internal" />
+          )}
+          {visibleStructureEvents
+            .filter(
+              (event) =>
+                (event.scope === 'SWING' && layers.structure) ||
+                (event.scope === 'INTERNAL' && layers.internalStructure),
+            )
+            .map((event) => {
+              const startX = x(Math.max(0, event.pivotIndex - offset));
+              const endX = x(event.index - offset);
+              const labelX = Math.min(
+                plotRight - 34,
+                Math.max(startX, endX - 8),
+              );
+              const lowImportanceDiscountChoch =
+                event.kind === 'CHOCH' &&
+                event.direction === 'BEARISH' &&
+                event.price < dealingRangeEquilibrium;
+              const eventLabel =
+                event.kind === 'CHOCH'
+                  ? `${event.scope === 'SWING' ? 'Swing' : 'Internal'} ${event.direction === 'BULLISH' ? '강세' : '약세'} CHOCH ${event.direction === 'BULLISH' ? '↑' : '↓'}${lowImportanceDiscountChoch ? ' · 낮은 중요도' : ''}`
+                  : event.label;
+              return (
+                <g
+                  key={`${event.scope}-${event.kind}-${event.index}`}
+                  className={`structure-event ${event.scope.toLowerCase()} ${event.kind.toLowerCase()} ${event.direction.toLowerCase()}${lowImportanceDiscountChoch ? ' low-importance' : ''}`}
+                >
+                  <line
+                    x1={startX}
+                    x2={endX}
+                    y1={y(event.price)}
+                    y2={y(event.price)}
+                  />
+                  <circle cx={endX} cy={y(event.price)} r="2.5" />
+                  <text x={labelX} y={y(event.price) - 5} textAnchor="end">
+                    {eventLabel}
+                  </text>
+                  <title>{`${event.label} · 종가 기준 구조 이탈 · ${data[event.index]?.date.slice(0, 16) ?? ''}`}</title>
+                </g>
               );
             })}
           {displayed.map((candle, index) => {
@@ -1101,6 +1374,27 @@ function PriceChart({
                   {pivot.label}
                 </text>
                 <title>{`${pivot.label} · ${formatPrice(pivot.price, market)} · ${data[pivot.index]?.date.slice(0, 16) ?? ''}`}</title>
+              </g>
+            ))}
+          {layers.internalStructure &&
+            internalStructurePivots.map((pivot) => (
+              <g
+                key={`internal-${pivot.kind}-${pivot.index}`}
+                className={`internal-structure-marker ${pivot.kind}`}
+              >
+                <circle
+                  cx={x(pivot.index - offset)}
+                  cy={y(pivot.price)}
+                  r="1.8"
+                />
+                <text
+                  x={x(pivot.index - offset)}
+                  y={y(pivot.price) + (pivot.kind === 'high' ? -6 : 11)}
+                  textAnchor="middle"
+                >
+                  {pivot.label}
+                </text>
+                <title>{`Internal ${pivot.label} · ${formatPrice(pivot.price, market)}`}</title>
               </g>
             ))}
           {layers.liquidity &&
@@ -1213,6 +1507,63 @@ function PriceChart({
               <title>{`현재가 ${formatPrice(currentPrice, market)}`}</title>
             </g>
           </g>
+          {layers.volume && (
+            <g className="volume-pane" aria-label="거래량">
+              <line
+                x1={padding}
+                x2={axisStart}
+                y1={volumeTop - 10}
+                y2={volumeTop - 10}
+                className="volume-divider"
+              />
+              <line
+                x1={padding}
+                x2={plotRight}
+                y1={volumeY(volumeMaximum * 0.5)}
+                y2={volumeY(volumeMaximum * 0.5)}
+                className="volume-gridline"
+              />
+              {displayed.map((candle, index) => {
+                const upward = candle.close >= candle.open;
+                const barWidth = Math.max(
+                  2,
+                  ((plotRight - padding) / displayed.length) * 0.58,
+                );
+                return (
+                  <rect
+                    key={`volume-${candle.date}-${index}`}
+                    x={x(index) - barWidth / 2}
+                    y={volumeY(candle.volume)}
+                    width={barWidth}
+                    height={Math.max(1, volumeBottom - volumeY(candle.volume))}
+                    className={`volume-bar ${upward ? 'up' : 'down'}`}
+                  >
+                    <title>{`${candle.date.slice(0, 16)} · 거래량 ${formatVolume(candle.volume)}`}</title>
+                  </rect>
+                );
+              })}
+              <path d={volumeAveragePath} className="volume-average" />
+              <text x={padding + 4} y={volumeTop + 11} className="volume-label">
+                VOL {formatVolume(latestVisibleCandle.volume)}
+              </text>
+              <text
+                x={padding + 4}
+                y={volumeTop + 24}
+                className="volume-average-label"
+              >
+                MA20 {formatVolume(visibleVolumeAverages.at(-1) ?? 0)} · RVOL{' '}
+                {analysis.volumeStats.ratio.toFixed(2)}×
+              </text>
+              <text
+                x={width - padding - 4}
+                y={volumeTop + 11}
+                textAnchor="end"
+                className="volume-scale-label"
+              >
+                {formatVolume(volumeMaximum)}
+              </text>
+            </g>
+          )}
         </g>
       </svg>
     </div>
@@ -1520,11 +1871,18 @@ export default function Home() {
   const [symbol, setSymbol] = useState('ONDS');
   const [tab, setTab] = useState<'analysis' | 'backtest'>('analysis');
   const [data, setData] = useState<Candle[]>(() => demo());
+  const [higherTimeframeData, setHigherTimeframeData] =
+    useState<HigherTimeframeData>({});
+  const [dataSource, setDataSource] = useState<'demo' | 'kiwoom' | 'csv'>(
+    'demo',
+  );
   const [status, setStatus] = useState('예시 데이터 · 종목을 불러오세요');
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     structure: true,
+    internalStructure: true,
+    volume: true,
     volumeProfile: true,
     orderflow: false,
     liquidity: false,
@@ -1533,19 +1891,23 @@ export default function Home() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(loadWatchlist);
+  const [watchlist, setWatchlist] =
+    useState<WatchlistEntry[]>(DEFAULT_WATCHLIST);
   const [watchlistDraft, setWatchlistDraft] =
-    useState<WatchlistEntry[]>(loadWatchlist);
+    useState<WatchlistEntry[]>(DEFAULT_WATCHLIST);
   const [watchlistError, setWatchlistError] = useState('');
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
-  const [liveErrors, setLiveErrors] = useState<Record<string, string>>({});
+  const [liveErrors, setLiveErrors] = useState<Record<string, LiveQuoteError>>(
+    {},
+  );
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState('');
   const [liveError, setLiveError] = useState('');
-  const [loadedFeed, setLoadedFeed] = useState<string | null>(null);
-  const [preferences, setPreferences] = useState<Preferences>(loadPreferences);
+  const [preferences, setPreferences] =
+    useState<Preferences>(DEFAULT_PREFERENCES);
   const [settingsDraft, setSettingsDraft] =
-    useState<Preferences>(loadPreferences);
+    useState<Preferences>(DEFAULT_PREFERENCES);
+  const [storageReady, setStorageReady] = useState(false);
   const [lookback, setLookback] = useState(20);
   const [rewardRisk, setRewardRisk] = useState(2);
   const [direction, setDirection] = useState<BacktestDirection>('BOTH');
@@ -1553,21 +1915,52 @@ export default function Home() {
   const [appliedBacktestTimeframe, setAppliedBacktestTimeframe] =
     useState<Timeframe>('5m');
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
-  const [appliedBacktest, setAppliedBacktest] = useState<BacktestOptions>(
-    () => ({
-      minRR: 2,
-      lookback: 20,
-      initialCapital: loadPreferences().capital,
-      riskPct: loadPreferences().riskPct,
-      feeBps: loadPreferences().feeBps,
-      slippageBps: loadPreferences().slippageBps,
-      direction: 'BOTH',
-    }),
-  );
+  const [appliedBacktest, setAppliedBacktest] = useState<BacktestOptions>({
+    minRR: 2,
+    lookback: 20,
+    initialCapital: DEFAULT_PREFERENCES.capital,
+    riskPct: DEFAULT_PREFERENCES.riskPct,
+    feeBps: DEFAULT_PREFERENCES.feeBps,
+    slippageBps: DEFAULT_PREFERENCES.slippageBps,
+    direction: 'BOTH',
+  });
   const [lastRun, setLastRun] = useState('초기 계산');
   const fileInput = useRef<HTMLInputElement>(null);
   const liveRequestInFlight = useRef(false);
+  const liveAbortController = useRef<AbortController | null>(null);
+  const marketDataCache = useRef(new Map<string, MarketDataCacheEntry>());
+  const marketAbortController = useRef<AbortController | null>(null);
+  const marketRequestId = useRef(0);
   const initialLoadStarted = useRef(false);
+
+  useEffect(() => {
+    const restoreSavedSettings = window.setTimeout(() => {
+      const savedWatchlist = loadWatchlist();
+      const savedPreferences = loadPreferences();
+      setWatchlist(savedWatchlist);
+      setWatchlistDraft(savedWatchlist);
+      setPreferences(savedPreferences);
+      setSettingsDraft(savedPreferences);
+      setAppliedBacktest((currentOptions) => ({
+        ...currentOptions,
+        initialCapital: savedPreferences.capital,
+        riskPct: savedPreferences.riskPct,
+        feeBps: savedPreferences.feeBps,
+        slippageBps: savedPreferences.slippageBps,
+      }));
+      setStorageReady(true);
+    }, 0);
+    return () => window.clearTimeout(restoreSavedSettings);
+  }, []);
+
+  useEffect(
+    () => () => {
+      marketRequestId.current += 1;
+      marketAbortController.current?.abort();
+      marketAbortController.current = null;
+    },
+    [],
+  );
 
   const watchedSymbols = useMemo(
     () =>
@@ -1581,9 +1974,13 @@ export default function Home() {
     for (const item of symbols[market]) byFeed.set(item.feed, item);
     for (const item of watchedSymbols) {
       if (item.market !== market) continue;
+      const quote = liveQuotes[liveQuoteKey(item)];
       byFeed.set(item.feed, {
         ...item,
-        name: liveQuotes[item.feed]?.name || item.name,
+        name:
+          item.market === 'KR' && item.name !== item.code
+            ? item.name
+            : quote?.name || item.name,
       });
     }
     return Array.from(byFeed.values());
@@ -1591,27 +1988,56 @@ export default function Home() {
   const current =
     availableSymbols.find((item) => item.code === symbol) ??
     availableSymbols[0];
-  const baseAnalysis = useMemo(() => analyze(data), [data]);
-  const chartData = useMemo(
-    () => resample(data, timeframeSizes[timeframe]),
-    [data, timeframe],
-  );
-  const analysisData = chartData.length >= 20 ? chartData : data;
+  const timeframeData = useMemo<Record<Timeframe, Candle[]>>(() => {
+    const useKiwoomTimeframes = dataSource === 'kiwoom';
+    const fifteenMinute = useKiwoomTimeframes
+      ? higherTimeframeData['15m'] || []
+      : higherTimeframeData['15m']?.length
+      ? higherTimeframeData['15m']
+      : resampleBySession(data, timeframeSizes['15m']);
+    const hourly = useKiwoomTimeframes
+      ? higherTimeframeData['1H'] || []
+      : higherTimeframeData['1H']?.length
+      ? higherTimeframeData['1H']
+      : resampleBySession(data, timeframeSizes['1H']);
+    const fourHour = useKiwoomTimeframes
+      ? higherTimeframeData['4H'] || []
+      : higherTimeframeData['4H']?.length
+      ? higherTimeframeData['4H']
+      : resampleBySession(hourly, 4);
+    const daily = useKiwoomTimeframes
+      ? higherTimeframeData['1D'] || []
+      : higherTimeframeData['1D']?.length
+      ? higherTimeframeData['1D']
+      : resampleBySession(data, timeframeSizes['1D']);
+    return {
+      '5m': data,
+      '15m': fifteenMinute,
+      '1H': hourly,
+      '4H': fourHour,
+      '1D': daily,
+    };
+  }, [data, dataSource, higherTimeframeData]);
+  const chartData = timeframeData[timeframe];
+  const analysisData = chartData;
   const analysis = useMemo(() => analyze(analysisData), [analysisData]);
+  const timeframeSnapshots = useMemo(
+    () =>
+      Object.fromEntries(
+        (Object.entries(timeframeData) as Array<[Timeframe, Candle[]]>).map(
+          ([name, candles]) => [name, structureSnapshot(candles)],
+        ),
+      ) as Record<Timeframe, Snapshot>,
+    [timeframeData],
+  );
   const selectedDirection = directionLabel(analysis.bias);
   const timeframeContext = multiTimeframeContext(
-    baseAnalysis.snapshots['1D'].trend,
-    baseAnalysis.snapshots['4H'].trend,
+    timeframeSnapshots['1D'].trend,
+    timeframeSnapshots['4H'].trend,
     analysis.bias,
   );
-  const draftBacktestData = useMemo(
-    () => resample(data, timeframeSizes[backtestTimeframe]),
-    [backtestTimeframe, data],
-  );
-  const backtestData = useMemo(
-    () => resample(data, timeframeSizes[appliedBacktestTimeframe]),
-    [appliedBacktestTimeframe, data],
-  );
+  const draftBacktestData = timeframeData[backtestTimeframe];
+  const backtestData = timeframeData[appliedBacktestTimeframe];
   const result = useMemo(
     () => backtest(backtestData, appliedBacktest),
     [appliedBacktest, backtestData],
@@ -1623,99 +2049,176 @@ export default function Home() {
   const maxLookback = Math.max(8, Math.min(50, draftBacktestData.length - 2));
   const canRunBacktest = draftBacktestData.length >= Math.max(lookback, 20) + 2;
   const last = chartData.at(-1)?.close ?? data.at(-1)!.close;
-  const activeLiveQuote = liveQuotes[current.feed];
+  const currentLiveQuoteKey = liveQuoteKey({ ...current, market });
+  const activeLiveQuote = liveQuotes[currentLiveQuoteKey];
   const displayedPrice = activeLiveQuote?.price ?? last;
+
+  useEffect(() => {
+    document.title = `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
+  }, [current.currency, current.name, displayedPrice, market]);
+
   const entryMidpoint = (analysis.entry[0] + analysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - analysis.stop), 0.000001);
   const riskBudget = preferences.capital * (preferences.riskPct / 100);
   const positionSize = Math.max(0, Math.floor(riskBudget / unitRisk));
   const positionNotional = positionSize * entryMidpoint;
 
-  const loadMarketData = useCallback(async (item: SymbolItem) => {
-    setLoading(true);
-    setStatus(`${item.code} 분석 데이터 불러오는 중…`);
-    try {
-      const response = await fetch(
-        `/api/market?symbol=${encodeURIComponent(item.feed)}`,
-      );
-      const payload = (await response.json()) as MarketResponse;
-      if (!response.ok)
-        throw new Error(
-          payload.error || `데이터 제공처 오류 ${response.status}`,
+  const loadMarketData = useCallback(
+    async (item: SymbolItem | WatchedSymbol) => {
+      const itemMarket = 'market' in item ? item.market : market;
+      const exchange = itemMarket === 'US' ? item.exchange || 'ND' : '';
+      const cacheKey = `${itemMarket}:${item.code}:${exchange}`;
+      const requestId = ++marketRequestId.current;
+      marketAbortController.current?.abort();
+
+      const applyPayload = (payload: MarketDataCacheEntry['payload']) => {
+        setData(payload.candles);
+        setHigherTimeframeData(payload.timeframes || {});
+        setDataSource('kiwoom');
+        setStatus(
+          `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
         );
-      if (!payload.candles || payload.candles.length < 40) {
-        throw new Error('분석 가능한 데이터가 부족합니다.');
+      };
+
+      const cached = marketDataCache.current.get(cacheKey);
+      if (cached) {
+        applyPayload(cached.payload);
+        if (Date.now() - cached.cachedAt < MARKET_DATA_CACHE_TTL_MS) {
+          setLoading(false);
+          return;
+        }
       }
-      setData(payload.candles);
-      setLoadedFeed(item.feed);
+
+      const controller = new AbortController();
+      marketAbortController.current = controller;
+      setLoading(true);
       setStatus(
-        `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
+        cached
+          ? `${item.code} 최신 데이터 확인 중…`
+          : `${item.code} 분석 데이터 불러오는 중…`,
       );
-    } catch (error) {
-      setStatus(
-        `불러오기 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'} · CSV를 사용할 수 있습니다.`,
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      try {
+        const query = new URLSearchParams({
+          market: itemMarket,
+          symbol: item.code,
+          ...(itemMarket === 'US' ? { exchange } : {}),
+        });
+        const response = await fetch(`/api/market?${query.toString()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as MarketResponse;
+        if (!response.ok)
+          throw new Error(
+            payload.error || `데이터 제공처 오류 ${response.status}`,
+          );
+        if (!payload.candles || payload.candles.length < 40) {
+          throw new Error('분석 가능한 데이터가 부족합니다.');
+        }
+        const nativeTimeframes: Timeframe[] = ['15m', '1H', '4H', '1D'];
+        if (
+          nativeTimeframes.some(
+            (name) => !payload.timeframes?.[name]?.length,
+          )
+        ) {
+          throw new Error('키움 시간봉 데이터가 모두 준비되지 않았습니다.');
+        }
+        if (requestId !== marketRequestId.current) return;
+        const cachePayload = payload as MarketDataCacheEntry['payload'];
+        marketDataCache.current.set(cacheKey, {
+          payload: cachePayload,
+          cachedAt: Date.now(),
+        });
+        applyPayload(cachePayload);
+      } catch (error) {
+        if (controller.signal.aborted || requestId !== marketRequestId.current)
+          return;
+        setStatus(
+          `불러오기 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'} · CSV를 사용할 수 있습니다.`,
+        );
+      } finally {
+        if (marketAbortController.current === controller) {
+          marketAbortController.current = null;
+          setLoading(false);
+        }
+      }
+    },
+    [market],
+  );
 
   const refreshLiveQuotes = useCallback(async () => {
-    if (!watchedSymbols.length || liveRequestInFlight.current) return;
+    if (!storageReady || !watchedSymbols.length || liveRequestInFlight.current)
+      return;
     liveRequestInFlight.current = true;
+    const controller = new AbortController();
+    liveAbortController.current = controller;
     setLiveLoading(true);
     try {
-      const feeds = watchedSymbols.map((item) => item.feed).join(',');
+      const items = watchedSymbols.map(liveQuoteKey).join(',');
       const response = await fetch(
-        `/api/quotes?symbols=${encodeURIComponent(feeds)}`,
-        { cache: 'no-store' },
+        `/api/quotes?items=${encodeURIComponent(items)}`,
+        { cache: 'no-store', signal: controller.signal },
       );
       const payload = (await response.json()) as QuotesResponse;
       const errors = Object.fromEntries(
-        (payload.errors || []).map((item) => [item.symbol, item.error]),
+        (payload.errors || []).map((item) => [item.key, item]),
       );
       setLiveErrors(errors);
       if (!response.ok && !payload.quotes?.length) {
-        throw new Error(payload.error || '실시간 시세를 받지 못했습니다.');
+        throw new Error(
+          payload.error ||
+            payload.errors?.[0]?.error ||
+            '실시간 시세를 받지 못했습니다.',
+        );
       }
 
       const quotes = payload.quotes || [];
       setLiveQuotes((previous) => ({
         ...previous,
-        ...Object.fromEntries(quotes.map((quote) => [quote.symbol, quote])),
+        ...Object.fromEntries(quotes.map((quote) => [quote.key, quote])),
       }));
       setLiveUpdatedAt(payload.fetchedAt || new Date().toISOString());
       setLiveError('');
 
-      const activeQuote = quotes.find((quote) => quote.symbol === current.feed);
-      if (activeQuote && loadedFeed === current.feed) {
-        setData((candles) => mergeLiveCandle(candles, activeQuote));
-      }
     } catch (error) {
+      if (controller.signal.aborted) return;
       setLiveError(
         error instanceof Error ? error.message : '실시간 시세 연결 오류',
       );
     } finally {
-      setLiveLoading(false);
-      liveRequestInFlight.current = false;
+      if (liveAbortController.current === controller) {
+        liveAbortController.current = null;
+        setLiveLoading(false);
+        liveRequestInFlight.current = false;
+      }
     }
-  }, [current.feed, loadedFeed, watchedSymbols]);
+  }, [storageReady, watchedSymbols]);
 
   useEffect(() => {
-    const initialRefresh = window.setTimeout(() => {
-      void refreshLiveQuotes();
-    }, 0);
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshLiveQuotes();
-    }, 5_000);
-    return () => {
-      window.clearTimeout(initialRefresh);
-      window.clearInterval(interval);
+    let cancelled = false;
+    let nextPoll: number | undefined;
+    console.info(`[quotes] polling started count=${watchedSymbols.length}`);
+    const poll = async () => {
+      const startedAt = Date.now();
+      if (document.visibilityState === 'visible') await refreshLiveQuotes();
+      if (cancelled) return;
+      const elapsed = Date.now() - startedAt;
+      nextPoll = window.setTimeout(poll, Math.max(250, 5_000 - elapsed));
     };
-  }, [refreshLiveQuotes]);
+    nextPoll = window.setTimeout(poll, 0);
+    return () => {
+      cancelled = true;
+      if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+      liveAbortController.current?.abort();
+      liveAbortController.current = null;
+      liveRequestInFlight.current = false;
+      console.info('[quotes] polling stopped');
+    };
+  }, [refreshLiveQuotes, watchedSymbols.length]);
 
   useEffect(() => {
-    if (initialLoadStarted.current || !watchedSymbols.length) return;
+    if (!storageReady || initialLoadStarted.current || !watchedSymbols.length)
+      return;
     initialLoadStarted.current = true;
     const initial =
       watchedSymbols.find((item) => item.feed === current.feed) ??
@@ -1726,7 +2229,7 @@ export default function Home() {
       void loadMarketData(initial);
     }, 0);
     return () => window.clearTimeout(initialLoad);
-  }, [current.feed, loadMarketData, watchedSymbols]);
+  }, [current.feed, loadMarketData, storageReady, watchedSymbols]);
 
   const chooseMarket = (nextMarket: Market) => {
     setMarket(nextMarket);
@@ -1757,7 +2260,7 @@ export default function Home() {
       .map((entry) => ({ ...entry, ticker: entry.ticker.trim().toUpperCase() }))
       .filter((entry) => entry.ticker);
     const normalized = cleaned.map(normalizeWatchlistEntry);
-    if (cleaned.length < 1 || cleaned.length > 3) {
+    if (cleaned.length < 1 || cleaned.length > MAX_WATCHLIST_SIZE) {
       setWatchlistError('관심종목은 1개에서 3개까지 지정할 수 있습니다.');
       return;
     }
@@ -1767,8 +2270,8 @@ export default function Home() {
       );
       return;
     }
-    const feeds = normalized.map((item) => item!.feed);
-    if (new Set(feeds).size !== feeds.length) {
+    const quoteKeys = normalized.map((item) => liveQuoteKey(item!));
+    if (new Set(quoteKeys).size !== quoteKeys.length) {
       setWatchlistError('같은 종목이 중복되어 있습니다.');
       return;
     }
@@ -1776,6 +2279,7 @@ export default function Home() {
     const saved = normalized.map((item) => ({
       market: item!.market,
       ticker: item!.feed,
+      ...(item!.market === 'US' ? { exchange: item!.exchange || 'ND' } : {}),
     }));
     setWatchlist(saved);
     setLiveQuotes({});
@@ -1794,7 +2298,8 @@ export default function Home() {
       const candles = parseCsv(await file.text());
       if (candles.length < 20) throw new Error('최소 20개 캔들이 필요합니다.');
       setData(candles);
-      setLoadedFeed(null);
+      setHigherTimeframeData({});
+      setDataSource('csv');
       setTimeframe('5m');
       setStatus(
         `${file.name} · ${candles.length.toLocaleString()}개 캔들 · 계산 완료`,
@@ -1851,7 +2356,7 @@ export default function Home() {
   };
 
   const chooseBacktestTimeframe = (nextTimeframe: Timeframe) => {
-    const availableBars = resample(data, timeframeSizes[nextTimeframe]).length;
+    const availableBars = timeframeData[nextTimeframe].length;
     const nextMaximum = Math.max(8, Math.min(50, availableBars - 2));
     setBacktestTimeframe(nextTimeframe);
     setLookback((currentLookback) => clamp(currentLookback, 8, nextMaximum));
@@ -1911,11 +2416,13 @@ export default function Home() {
     );
   };
 
-  const timeframeRows = Object.entries(baseAnalysis.snapshots) as Array<
-    [Timeframe, Snapshot]
-  >;
+  const timeframeRows = (['1D', '4H', '1H', '15m', '5m'] as Timeframe[]).map(
+    (name) => [name, timeframeSnapshots[name]] as [Timeframe, Snapshot],
+  );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
-    { key: 'structure', label: '구조' },
+    { key: 'structure', label: '스윙구조' },
+    { key: 'internalStructure', label: '내부구조' },
+    { key: 'volume', label: '거래량' },
     { key: 'volumeProfile', label: 'VP' },
     { key: 'orderflow', label: 'OB/FVG' },
     { key: 'liquidity', label: '유동성' },
@@ -2051,19 +2558,35 @@ export default function Home() {
         </div>
         <div className="live-watch-cards">
           {watchedSymbols.map((item) => {
-            const quote = liveQuotes[item.feed];
-            const quoteError = liveErrors[item.feed];
+            const quoteKey = liveQuoteKey(item);
+            const quote = liveQuotes[quoteKey];
+            const quoteError = liveErrors[quoteKey];
+            const quoteState = liveQuoteStatus(quote, quoteError);
+            const stale = quoteState === '오래됨';
+            const displayName =
+              item.market === 'KR' && item.name !== item.code
+                ? item.name
+                : quote?.name || item.name;
             return (
               <button
                 type="button"
-                key={item.feed}
+                key={quoteKey}
                 className={current.feed === item.feed ? 'selected' : ''}
                 onClick={() => activateWatchedSymbol(item)}
+                title={quoteError?.error}
               >
                 <div>
-                  <b>{item.code}</b>
-                  <span className={quote ? 'connected' : 'waiting'}>
-                    {quote ? marketStateLabel(quote.marketState) : '대기'}
+                  <b>
+                    {item.market === 'KR'
+                      ? `${item.code} · ${displayName}`
+                      : item.code}
+                  </b>
+                  <span
+                    className={
+                      quote && !quoteError && !stale ? 'connected' : 'waiting'
+                    }
+                  >
+                    {quoteState}
                   </span>
                 </div>
                 {quote ? (
@@ -2076,13 +2599,17 @@ export default function Home() {
                       {quote.change >= 0 ? '+' : ''}
                       {quote.changePct.toFixed(2)}%
                     </em>
-                    <small>{quote.name}</small>
+                    <small>
+                      {quoteError
+                        ? `${displayName} · 이전 정상 가격 유지`
+                        : displayName}
+                    </small>
                   </>
                 ) : (
                   <>
                     <strong>--</strong>
                     <em className="quote-error">
-                      {quoteError || liveError || '시세 수신 중'}
+                      {quoteError?.error || liveError || '시세 수신 중'}
                     </em>
                     <small>{item.name}</small>
                   </>
@@ -2104,7 +2631,7 @@ export default function Home() {
           <button type="button" onClick={openWatchlistSettings}>
             <Settings2 size={14} /> 종목 설정
           </button>
-          <small>5초 자동 갱신 · 제공처 지연 가능</small>
+          <small>5초 주기 · 키움 REST</small>
         </div>
       </section>
 
@@ -2140,7 +2667,7 @@ export default function Home() {
                     : `${selectedDirection} 보류`}
               </h1>
               <p>
-                {baseAnalysis.snapshots[timeframe].event} · {timeframeContext} ·
+                {timeframeSnapshots[timeframe].event} · {timeframeContext} ·
                 구조·위치·추세·손익비 조건부 예측
               </p>
             </div>
@@ -2403,7 +2930,7 @@ export default function Home() {
                   </span>
                   <b>{analysis.score >= 70 ? '후보' : '대기'}</b>
                 </header>
-                <h3>{baseAnalysis.snapshots[timeframe].event}</h3>
+                <h3>{timeframeSnapshots[timeframe].event}</h3>
                 <p>돌파 종가와 리테스트 유지 필요</p>
                 <dl>
                   <div>
@@ -2442,7 +2969,7 @@ export default function Home() {
               <div className="score-list">
                 <div>
                   <span>HTF 구조</span>
-                  <b>{baseAnalysis.snapshots['1D'].score}/100</b>
+                  <b>{timeframeSnapshots['1D'].score}/100</b>
                 </div>
                 <div>
                   <span>VP 위치</span>
@@ -2775,7 +3302,8 @@ export default function Home() {
             <DialogTitle>실시간 관심종목 설정</DialogTitle>
             <DialogDescription>
               자동 갱신할 종목을 1개에서 3개까지 지정하세요. 미국은 영문 티커,
-              한국은 6자리 종목 코드를 입력하면 됩니다.
+              한국은 6자리 종목 코드를 입력하면 됩니다. 미국 종목은 거래소도
+              선택하세요.
             </DialogDescription>
           </DialogHeader>
           <div className="watchlist-editor">
@@ -2789,10 +3317,9 @@ export default function Home() {
                     setWatchlistDraft((draft) =>
                       draft.map((item, itemIndex) =>
                         itemIndex === index
-                          ? {
-                              market: event.target.value as Market,
-                              ticker: '',
-                            }
+                          ? event.target.value === 'US'
+                            ? { market: 'US', ticker: '', exchange: 'ND' }
+                            : { market: 'KR', ticker: '' }
                           : item,
                       ),
                     )
@@ -2801,6 +3328,35 @@ export default function Home() {
                   <option value="US">미국</option>
                   <option value="KR">한국</option>
                 </select>
+                {entry.market === 'US' ? (
+                  <select
+                    value={entry.exchange || 'ND'}
+                    aria-label={`관심종목 ${index + 1} 미국 거래소`}
+                    onChange={(event) =>
+                      setWatchlistDraft((draft) =>
+                        draft.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                exchange: event.target.value as UsExchange,
+                              }
+                            : item,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="ND">NASDAQ</option>
+                    <option value="NY">NYSE</option>
+                    <option value="NA">AMEX</option>
+                  </select>
+                ) : (
+                  <select
+                    aria-label={`관심종목 ${index + 1} 한국 거래소`}
+                    disabled
+                  >
+                    <option>KRX</option>
+                  </select>
+                )}
                 <input
                   value={entry.ticker}
                   placeholder={
@@ -2839,12 +3395,20 @@ export default function Home() {
           <button
             type="button"
             className="add-watch-symbol"
-            disabled={watchlistDraft.length >= 3}
+            disabled={watchlistDraft.length >= MAX_WATCHLIST_SIZE}
             onClick={() =>
-              setWatchlistDraft((draft) => [...draft, { market, ticker: '' }])
+              setWatchlistDraft((draft) => [
+                ...draft,
+                market === 'US'
+                  ? { market: 'US', ticker: '', exchange: 'ND' }
+                  : { market: 'KR', ticker: '' },
+              ])
             }
           >
-            <Plus size={14} /> 종목 추가
+            <Plus size={14} />
+            {watchlistDraft.length >= MAX_WATCHLIST_SIZE
+              ? '3개 등록됨 · 하나를 삭제해 교체'
+              : '종목 추가'}
           </button>
           {watchlistError && (
             <p className="watchlist-error">{watchlistError}</p>
@@ -2852,10 +3416,10 @@ export default function Home() {
           <div className="watchlist-notice">
             <Wifi size={16} />
             <div>
-              <strong>5초 자동 갱신</strong>
+              <strong>5초마다 시세 확인</strong>
               <p>
-                데이터 제공처의 무료 시세를 사용하므로 거래소 상황에 따라 지연될
-                수 있습니다.
+                로컬 실행 여부와 관계없이 키움 REST API를 5초 주기로 조회합니다.
+                장 마감 중에는 마지막 체결 가격이 유지될 수 있습니다.
               </p>
             </div>
           </div>

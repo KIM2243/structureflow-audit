@@ -95,6 +95,8 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api) return;
+    // Sync the initial snapshot before subscribing to subsequent carousel events.
+    // oxlint-disable-next-line react/react-compiler
     onSelect(api);
     api.on('reInit', onSelect);
     api.on('select', onSelect);

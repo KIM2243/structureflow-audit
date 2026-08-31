@@ -14,6 +14,23 @@ export type Pivot = {
   label: string;
 };
 
+export type StructureEvent = {
+  index: number;
+  pivotIndex: number;
+  price: number;
+  kind: 'BOS' | 'CHOCH';
+  direction: 'BULLISH' | 'BEARISH';
+  scope: 'SWING' | 'INTERNAL';
+  label: string;
+};
+
+export type StructureState = {
+  swingTrend: 'BULLISH' | 'BEARISH' | 'TRANSITION';
+  internalTrend: 'BULLISH' | 'BEARISH' | 'TRANSITION';
+  latestSwingEvent?: StructureEvent;
+  latestInternalEvent?: StructureEvent;
+};
+
 export type Snapshot = {
   trend: string;
   sequence: string;
@@ -57,6 +74,14 @@ export type Analysis = {
   bias: 'LONG' | 'SHORT' | 'NEUTRAL';
   atr: number;
   pivots: Pivot[];
+  internalPivots: Pivot[];
+  structureEvents: StructureEvent[];
+  structureState: StructureState;
+  volumeStats: {
+    current: number;
+    average20: number;
+    ratio: number;
+  };
   poc: number;
   vah: number;
   val: number;
@@ -148,14 +173,35 @@ export function atr(data: Candle[], period = 14) {
 }
 
 export function pivots(data: Candle[], window = 3) {
-  const output: Pivot[] = [];
+  const candidates: Pivot[] = [];
   for (let index = window; index < data.length - window; index += 1) {
     const sample = data.slice(index - window, index + window + 1);
     if (data[index].high === Math.max(...sample.map((candle) => candle.high))) {
-      output.push({ index, price: data[index].high, kind: 'high', label: 'H' });
+      candidates.push({
+        index,
+        price: data[index].high,
+        kind: 'high',
+        label: 'H',
+      });
     }
     if (data[index].low === Math.min(...sample.map((candle) => candle.low))) {
-      output.push({ index, price: data[index].low, kind: 'low', label: 'L' });
+      candidates.push({ index, price: data[index].low, kind: 'low', label: 'L' });
+    }
+  }
+
+  // Consecutive highs or lows are collapsed to the more extreme point. This
+  // produces the mechanical alternating swing map used by the chart.
+  const output: Pivot[] = [];
+  for (const candidate of candidates) {
+    const previous = output.at(-1);
+    if (previous?.kind === candidate.kind) {
+      const isMoreExtreme =
+        candidate.kind === 'high'
+          ? candidate.price >= previous.price
+          : candidate.price <= previous.price;
+      if (isMoreExtreme) output[output.length - 1] = candidate;
+    } else {
+      output.push(candidate);
     }
   }
 
@@ -181,6 +227,75 @@ export function pivots(data: Candle[], window = 3) {
     }
   }
   return output;
+}
+
+function detectStructureEvents(
+  data: Candle[],
+  structure: Pivot[],
+  scope: StructureEvent['scope'],
+  confirmationWindow: number,
+) {
+  const events: StructureEvent[] = [];
+  let cursor = 0;
+  let latestHigh: Pivot | undefined;
+  let latestLow: Pivot | undefined;
+  let brokenHighIndex = -1;
+  let brokenLowIndex = -1;
+  let trend: StructureEvent['direction'] | 'TRANSITION' = 'TRANSITION';
+
+  for (let index = 0; index < data.length; index += 1) {
+    while (
+      cursor < structure.length &&
+      structure[cursor].index + confirmationWindow < index
+    ) {
+      const pivot = structure[cursor];
+      if (pivot.kind === 'high') latestHigh = pivot;
+      else latestLow = pivot;
+      cursor += 1;
+    }
+
+    const close = data[index].close;
+    const bullishBreak =
+      latestHigh &&
+      latestHigh.index !== brokenHighIndex &&
+      close > latestHigh.price;
+    const bearishBreak =
+      latestLow && latestLow.index !== brokenLowIndex && close < latestLow.price;
+
+    if (bullishBreak && latestHigh) {
+      const kind = trend === 'BEARISH' ? 'CHOCH' : 'BOS';
+      events.push({
+        index,
+        pivotIndex: latestHigh.index,
+        price: latestHigh.price,
+        kind,
+        direction: 'BULLISH',
+        scope,
+        label: `${scope === 'SWING' ? 'Swing' : 'Internal'} ${kind} ↑`,
+      });
+      brokenHighIndex = latestHigh.index;
+      trend = 'BULLISH';
+    } else if (bearishBreak && latestLow) {
+      const kind = trend === 'BULLISH' ? 'CHOCH' : 'BOS';
+      events.push({
+        index,
+        pivotIndex: latestLow.index,
+        price: latestLow.price,
+        kind,
+        direction: 'BEARISH',
+        scope,
+        label: `${scope === 'SWING' ? 'Swing' : 'Internal'} ${kind} ↓`,
+      });
+      brokenLowIndex = latestLow.index;
+      trend = 'BEARISH';
+    }
+  }
+
+  return events;
+}
+
+function trendFromEvents(events: StructureEvent[]) {
+  return events.at(-1)?.direction ?? 'TRANSITION';
 }
 
 export function resample(data: Candle[], size: number) {
@@ -210,10 +325,9 @@ function snapshot(data: Candle[]): Snapshot {
       score: 50,
     };
   }
-  const structure = pivots(
-    data,
-    Math.max(2, Math.min(4, Math.floor(data.length / 20))),
-  );
+  const pivotWindow = Math.max(2, Math.min(4, Math.floor(data.length / 20)));
+  const structure = pivots(data, pivotWindow);
+  const events = detectStructureEvents(data, structure, 'SWING', pivotWindow);
   const recent = structure.slice(-4);
   const high = recent.filter((pivot) => pivot.kind === 'high').at(-1);
   const low = recent.filter((pivot) => pivot.kind === 'low').at(-1);
@@ -224,26 +338,33 @@ function snapshot(data: Candle[]): Snapshot {
     (pivot) => pivot.label === 'LH' || pivot.label === 'LL',
   ).length;
   const close = data.at(-1)!.close;
-  const event =
-    high && close > high.price
-      ? 'External BOS ↑'
+  const latestEvent = events.at(-1);
+  const event = latestEvent
+    ? latestEvent.label
+    : high && close > high.price
+      ? 'Swing BOS ↑'
       : low && close < low.price
-        ? 'External BOS ↓'
+        ? 'Swing BOS ↓'
         : bullish >= bearish
           ? 'Internal structure ↑'
           : 'Internal structure ↓';
 
   return {
     trend:
-      bullish > bearish
+      latestEvent?.direction ??
+      (bullish > bearish
         ? 'BULLISH'
         : bearish > bullish
           ? 'BEARISH'
-          : 'TRANSITION',
+          : 'TRANSITION'),
     sequence: recent.map((pivot) => pivot.label).join(' · ') || '판정 중',
     event,
     score: Math.round(50 + Math.abs(bullish - bearish) * 10),
   };
+}
+
+export function structureSnapshot(data: Candle[]): Snapshot {
+  return snapshot(data);
 }
 
 function detectZones(data: Candle[]) {
@@ -383,7 +504,31 @@ export function analyze(data: Candle[]): Analysis {
 
   const close = data.at(-1)!.close;
   const currentAtr = atr(data);
-  const structure = pivots(data);
+  const swingWindow = 5;
+  const internalWindow = 2;
+  const structure = pivots(data, swingWindow);
+  const internalStructure = pivots(data, internalWindow);
+  const swingEvents = detectStructureEvents(
+    data,
+    structure,
+    'SWING',
+    swingWindow,
+  );
+  const internalEvents = detectStructureEvents(
+    data,
+    internalStructure,
+    'INTERNAL',
+    internalWindow,
+  );
+  const structureEvents = [...swingEvents, ...internalEvents].sort(
+    (left, right) => left.index - right.index,
+  );
+  const structureState: StructureState = {
+    swingTrend: trendFromEvents(swingEvents),
+    internalTrend: trendFromEvents(internalEvents),
+    latestSwingEvent: swingEvents.at(-1),
+    latestInternalEvent: internalEvents.at(-1),
+  };
   const recent = structure.slice(-8);
   const bullish = recent.filter(
     (pivot) => pivot.label === 'HH' || pivot.label === 'HL',
@@ -518,6 +663,14 @@ export function analyze(data: Candle[]): Analysis {
     bias,
     atr: currentAtr,
     pivots: structure,
+    internalPivots: internalStructure,
+    structureEvents,
+    structureState,
+    volumeStats: {
+      current: data.at(-1)!.volume,
+      average20: averageVolume20,
+      ratio: volumeRatio,
+    },
     poc: pointOfControl,
     vah: valueAreaHigh,
     val: valueAreaLow,
