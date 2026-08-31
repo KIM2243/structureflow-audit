@@ -4,6 +4,10 @@ import {
   type KiwoomMarket,
   type KiwoomUsExchange,
 } from '@/lib/kiwoom';
+import {
+  fetchFromKiwoomBridge,
+  isKiwoomBridgeConfigured,
+} from '@/lib/bridge';
 
 const validKrSymbol = /^\d{6}$/;
 const validUsSymbol = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -11,6 +15,23 @@ const validUsExchanges = new Set<KiwoomUsExchange>(['NA', 'ND', 'NY']);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  if (isKiwoomBridgeConfigured()) {
+    try {
+      return await fetchFromKiwoomBridge(
+        '/api/market',
+        url.searchParams,
+        request.signal,
+      );
+    } catch (error) {
+      console.error(
+        `[bridge] market request failed message=${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      return Response.json(
+        { error: '집 PC의 키움 브리지에 연결하지 못했습니다.' },
+        { status: 502, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      );
+    }
+  }
   const market = (url.searchParams.get('market') || 'US').toUpperCase();
   const symbol = (url.searchParams.get('symbol') || 'ONDS').toUpperCase();
   const exchangeValue = (
