@@ -13,14 +13,14 @@ npm run bridge
 정상 실행 시 다음 주소에서 상태를 확인할 수 있습니다.
 
 ```text
-http://127.0.0.1:8789/health
+http://127.0.0.1:8790/health
 ```
 
 `/api/quotes`와 `/api/market`은 `Authorization: Bearer <KIWOOM_BRIDGE_TOKEN>` 헤더가 없으면 접근할 수 없습니다.
 
 ## 운영 연결
 
-외부에 공유기 포트를 개방하지 않습니다. 지속형 HTTPS 터널을 `http://127.0.0.1:8789`에 연결하고, 배포 환경에 다음 두 값을 비밀 설정으로 등록합니다.
+외부에 공유기 포트를 개방하지 않습니다. 지속형 HTTPS 터널을 `http://127.0.0.1:8790`에 연결하고, 배포 환경에 다음 두 값을 비밀 설정으로 등록합니다.
 
 - `KIWOOM_BRIDGE_URL`: 터널의 HTTPS 주소
 - `KIWOOM_BRIDGE_TOKEN`: PC의 `.env`와 동일한 값
