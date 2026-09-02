@@ -175,8 +175,9 @@ const DEFAULT_TIMEOUT_MS = 6_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
 const CHART_REQUEST_DELAY_MS = 250;
-const MAX_CHART_PAGES = 10;
+const MAX_CHART_PAGES = 20;
 const MAX_CHART_RECORDS = 2_000;
+const CHART_CANDLE_LIMIT = 400;
 
 let cachedToken: CachedToken | null = null;
 let tokenRequest: Promise<CachedToken> | null = null;
@@ -862,7 +863,7 @@ function toFourHourCandles(candles: KiwoomCandle[], market: KiwoomMarket) {
   });
 }
 
-function lastCandles(candles: KiwoomCandle[], count = 200) {
+function lastCandles(candles: KiwoomCandle[], count = CHART_CANDLE_LIMIT) {
   return candles.slice(Math.max(candles.length - count, 0));
 }
 
@@ -938,10 +939,10 @@ export async function getMarketChart(
   // so symbol switches do not wait for four full round trips in sequence,
   // while still avoiding a burst of simultaneous requests.
   const chartRequests = [
-    { scope: '5' as const, target: 240 },
-    { scope: '15' as const, target: 240 },
-    { scope: '60' as const, target: 900 },
-    { scope: '1D' as const, target: 240 },
+    { scope: '5' as const, target: 440 },
+    { scope: '15' as const, target: 440 },
+    { scope: '60' as const, target: 1_800 },
+    { scope: '1D' as const, target: 440 },
   ];
   const [fiveMinute, fifteenMinute, hourlyForAggregation, daily] =
     await Promise.all(

@@ -5,10 +5,6 @@ import {
   quoteRequestKey,
   type KiwoomQuoteRequest,
 } from '@/lib/kiwoom';
-import {
-  fetchFromKiwoomBridge,
-  isKiwoomBridgeConfigured,
-} from '@/lib/bridge';
 
 const REQUEST_STAGGER_MS = 1_100;
 
@@ -78,23 +74,6 @@ async function fetchStaggeredQuote(
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  if (isKiwoomBridgeConfigured()) {
-    try {
-      return await fetchFromKiwoomBridge(
-        '/api/quotes',
-        url.searchParams,
-        request.signal,
-      );
-    } catch (error) {
-      console.error(
-        `[bridge] quote request failed message=${error instanceof Error ? error.message : 'unknown'}`,
-      );
-      return Response.json(
-        { error: '집 PC의 키움 브리지에 연결하지 못했습니다.' },
-        { status: 502, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
-    }
-  }
   let items: KiwoomQuoteRequest[];
   try {
     items = parseQuoteRequests(url.searchParams.get('items') || '');

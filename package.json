@@ -9,9 +9,8 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
-    "bridge": "node --env-file=.env --experimental-strip-types scripts/kiwoom-bridge.mjs",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test lib/kiwoom.test.mjs",
+    "test": "node --experimental-strip-types --test lib/*.test.mjs",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate"
   },

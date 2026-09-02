@@ -33,10 +33,9 @@ yarn-error.log*
 # deployment and generated files
 .vercel
 next-env.d.ts
-.tools/
-.runtime/
-*.tar
 /dist/
 /.wrangler/
 /outputs/
 /work/
+
+.npm-cache/

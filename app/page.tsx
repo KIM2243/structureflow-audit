@@ -31,6 +31,10 @@ import {
   TrendingUp,
   UploadCloud,
   WalletCards,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Landmark,
+  ReceiptText,
   Wifi,
   WifiOff,
   ZoomIn,
@@ -58,12 +62,20 @@ import {
   type Candle,
   type Snapshot,
 } from '@/lib/engine';
+import {
+  evaluateMultiTimeframeEntry,
+  type EntryTimeframe,
+  type MultiTimeframeEntryStep,
+} from '@/lib/multi-timeframe';
+import { getRecentSwingRange } from '@/lib/swing-range';
 
 type Market = 'US' | 'KR';
 type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
   | 'structure'
+  | 'choch'
+  | 'swingLabels'
   | 'premiumDiscount'
   | 'internalStructure'
   | 'volume'
@@ -144,6 +156,40 @@ type QuotesResponse = {
 };
 
 type WatchedSymbol = SymbolItem & { market: Market };
+
+type PaperPosition = {
+  key: string;
+  market: Market;
+  symbol: string;
+  name: string;
+  currency: '$' | '₩';
+  quantity: number;
+  averagePrice: number;
+};
+
+type PaperFill = {
+  id: string;
+  market: Market;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+  fee: number;
+  realizedPnl: number;
+  filledAt: string;
+};
+
+type PaperAccount = {
+  cash: Record<Market, number>;
+  positions: PaperPosition[];
+  fills: PaperFill[];
+};
+
+const DEFAULT_PAPER_ACCOUNT: PaperAccount = {
+  cash: { US: 100_000, KR: 100_000_000 },
+  positions: [],
+  fills: [],
+};
 
 const symbols: Record<Market, SymbolItem[]> = {
   US: [
@@ -277,6 +323,77 @@ function multiTimeframeContext(
   if (entryBias === 'NEUTRAL') return '방향성 확인 대기';
   return '시간대별 구조 확인 필요';
 }
+
+type EntryLesson = {
+  role: string;
+  principle: string;
+  checks: string[];
+  next: string;
+  invalidation: string;
+};
+
+const entryLessons: Record<EntryTimeframe, EntryLesson> = {
+  '1D': {
+    role: '큰 그림과 주요 가치 영역을 정하는 배경 시간대',
+    principle:
+      '일봉·주봉은 주요 지지·저항과 거래량이 쌓인 가치 영역을 찾는 데 사용합니다. 이 시간대는 정밀 진입보다 전체 이야기와 우선순위를 정합니다.',
+    checks: [
+      '고점·저점이 연속으로 높아지는지 또는 낮아지는지 확인',
+      '현재 가격이 큰 구조의 프리미엄·디스카운트 중 어디에 있는지 확인',
+    ],
+    next: '일봉의 관심 구역 안에서 4시간 스윙 구조가 어떻게 발전하는지 확인합니다.',
+    invalidation:
+      '보호받던 스윙 고점·저점을 캔들 몸통으로 이탈하면 기존 편향을 재검토합니다.',
+  },
+  '4H': {
+    role: '현재 진행 중인 스윙 추세를 해석하는 핵심 시간대',
+    principle:
+      '4시간봉은 현재 스윙 추세를 판단하는 핵심 시간대입니다. 프로트렌드 임펄스인지 카운터트렌드 풀백인지 큰 흐름을 정하고, 다음 높은 저점 또는 낮은 고점이 만들어질 위치를 찾습니다.',
+    checks: [
+      '스윙 구조가 HH·HL 또는 LH·LL 중 어느 순서인지 확인',
+      '관심 구역이 강세의 디스카운트 또는 약세의 프리미엄에 있는지 확인',
+    ],
+    next: '15분 구조가 4시간 방향으로 전환·정렬되는 것을 기다립니다.',
+    invalidation:
+      '4시간 보호 스윙이 몸통 종가로 깨지면 기존 스윙 방향은 더 이상 우선 시나리오가 아닙니다.',
+  },
+  '1H': {
+    role: '4시간과 15분 사이의 구조 발전을 확인하는 보조 시간대',
+    principle:
+      '분석 마비를 피하기 위해 핵심 진입 시간대는 4H·15m·5m로 제한합니다. 1시간봉은 필수 게이트가 아니라 4시간 스윙이 15분 구조로 전개되는 과정을 보강하는 중간 확인으로 사용합니다.',
+    checks: [
+      '4시간 방향과 같은 구조 이탈 또는 CHoCH가 나타나는지 확인',
+      '1시간 신호 하나 때문에 4시간·15분의 명확한 이야기를 뒤집지 않기',
+    ],
+    next: '1시간이 애매하면 결론을 늘리지 말고 15분의 실제 구조 정렬을 기다립니다.',
+    invalidation:
+      '1시간 반대 구조가 지속되고 4시간 보호 스윙까지 위협하면 상위 편향을 재평가합니다.',
+  },
+  '15m': {
+    role: '현재 구간이 프로트렌드인지 풀백인지 판단하는 방향 시간대',
+    principle:
+      '15분봉은 4시간 되돌림의 시작과 종료를 먼저 보여주는 방향 시간대입니다. 높은 시간대 관심 구역에서 15분 구조가 4시간 스윙과 같은 방향으로 정렬될 때 진입 후보의 확률이 높아집니다.',
+    checks: [
+      '높은 시간대 관심 구역에서 CHoCH·구조 이탈이 발생했는지 확인',
+      '강세는 내부 디스카운트, 약세는 내부 프리미엄에서 기회 찾기',
+    ],
+    next: '15분 방향이 정렬되면 5분봉에서 같은 방향의 실행 트리거를 확인합니다.',
+    invalidation:
+      '15분이 높은 시간대 방향으로 정렬되지 않고 반대 구조를 계속 만들면 진입하지 않고 편향 변경 가능성을 열어 둡니다.',
+  },
+  '5m': {
+    role: '캔들 패턴과 정밀한 거래 실행을 담당하는 시간대',
+    principle:
+      '낮은 시간대는 높은 시간대에서 일어날 움직임을 먼저 보여줍니다. 5분봉은 예측용이 아니라 상위·중간 구조가 정렬된 뒤 실제 캔들 패턴과 트리거로 진입 가격을 좁히는 실행 도구입니다.',
+    checks: [
+      '4시간·15분 방향과 5분 구조가 모두 같은 방향인지 확인',
+      '관심 구역 안에서 몸통 종가 기준 구조 이탈과 진입 트리거 확인',
+    ],
+    next: '트리거가 없으면 가격을 추격하지 않고 관심 구역의 다음 확인을 기다립니다.',
+    invalidation:
+      '5분 구조가 반대로 전환되거나 계산된 손절·무효화 가격을 이탈하면 실행 시나리오를 폐기합니다.',
+  },
+};
 
 const backtestTimeframes: Timeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
@@ -500,7 +617,7 @@ const formatTradeDate = (value: string) => value.slice(0, 16).replace('T', ' ');
 const DEFAULT_CHART_BARS = 120;
 const HIGHER_TIMEFRAME_CHART_BARS = 200;
 const MIN_CHART_BARS = 18;
-const MAX_CHART_BARS = 200;
+const MAX_CHART_BARS = 400;
 
 function clampChartValue(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -1001,8 +1118,12 @@ function PriceChart({
       event.price >= minimum &&
       event.price <= maximum,
   );
-  const dealingRangeEquilibrium = (candleMaximum + candleMinimum) / 2;
-  const equilibriumY = clampedY(dealingRangeEquilibrium);
+  const dealingRange = getRecentSwingRange(analysis.pivots, endIndex);
+  const equilibriumY = dealingRange
+    ? clampedY(dealingRange.equilibrium)
+    : null;
+  const rangeHighY = dealingRange ? clampedY(dealingRange.high) : null;
+  const rangeLowY = dealingRange ? clampedY(dealingRange.low) : null;
 
   return (
     <div className="chart-wrap">
@@ -1114,20 +1235,24 @@ function PriceChart({
             height={chartBottom - padding}
             className="price-axis-background"
           />
-          {layers.premiumDiscount && (
+          {layers.premiumDiscount &&
+            dealingRange &&
+            equilibriumY !== null &&
+            rangeHighY !== null &&
+            rangeLowY !== null && (
             <g className="premium-discount-layer" aria-label="프리미엄 디스카운트 영역">
               <rect
                 x={padding}
-                y={padding}
+                y={rangeHighY}
                 width={plotRight - padding}
-                height={Math.max(0, equilibriumY - padding)}
+                height={Math.max(0, equilibriumY - rangeHighY)}
                 className="premium-zone"
               />
               <rect
                 x={padding}
                 y={equilibriumY}
                 width={plotRight - padding}
-                height={Math.max(0, chartBottom - equilibriumY)}
+                height={Math.max(0, rangeLowY - equilibriumY)}
                 className="discount-zone"
               />
               <line
@@ -1137,7 +1262,11 @@ function PriceChart({
                 y2={equilibriumY}
                 className="equilibrium-line"
               />
-              <text x={padding + 8} y={padding + 14} className="premium-label">
+              <text
+                x={padding + 8}
+                y={Math.min(equilibriumY - 4, rangeHighY + 14)}
+                className="premium-label"
+              >
                 PREMIUM
               </text>
               <text
@@ -1276,7 +1405,8 @@ function PriceChart({
           {visibleStructureEvents
             .filter(
               (event) =>
-                (event.scope === 'SWING' && layers.structure) ||
+                (event.scope === 'SWING' &&
+                  (event.kind === 'CHOCH' ? layers.choch : layers.structure)) ||
                 (event.scope === 'INTERNAL' && layers.internalStructure),
             )
             .map((event) => {
@@ -1289,7 +1419,8 @@ function PriceChart({
               const lowImportanceDiscountChoch =
                 event.kind === 'CHOCH' &&
                 event.direction === 'BEARISH' &&
-                event.price < dealingRangeEquilibrium;
+                dealingRange !== null &&
+                event.price < dealingRange.equilibrium;
               const eventLabel =
                 event.kind === 'CHOCH'
                   ? `${event.scope === 'SWING' ? 'Swing' : 'Internal'} ${event.direction === 'BULLISH' ? '강세' : '약세'} CHOCH ${event.direction === 'BULLISH' ? '↑' : '↓'}${lowImportanceDiscountChoch ? ' · 낮은 중요도' : ''}`
@@ -1355,7 +1486,7 @@ function PriceChart({
                   />
                 </g>
               ))}
-          {layers.structure &&
+          {layers.swingLabels &&
             structurePivots.map((pivot) => (
               <g
                 key={`${pivot.kind}-${pivot.index}`}
@@ -1867,10 +1998,183 @@ function BacktestTradeChart({
   );
 }
 
+function PaperTrading({
+  market,
+  current,
+  price,
+  liveQuotes,
+  preferences,
+}: {
+  market: Market;
+  current: SymbolItem;
+  price: number;
+  liveQuotes: Record<string, LiveQuote>;
+  preferences: Preferences;
+}) {
+  const [account, setAccount] = useState<PaperAccount>(DEFAULT_PAPER_ACCOUNT);
+  const [quantity, setQuantity] = useState(1);
+  const [message, setMessage] = useState('주문할 수량을 입력하세요.');
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('structureflow:paper-account');
+      if (saved) setAccount(JSON.parse(saved) as PaperAccount);
+    } catch {
+      setMessage('저장된 모의계좌를 불러오지 못해 새 계좌로 시작합니다.');
+    }
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    window.localStorage.setItem(
+      'structureflow:paper-account',
+      JSON.stringify(account),
+    );
+  }, [account, ready]);
+
+  const currentKey = market === 'KR' ? `KR:${current.code}` : `US:${current.exchange || 'ND'}:${current.code}`;
+  const position = account.positions.find((item) => item.key === currentKey);
+  const safeQuantity = Math.max(1, Math.floor(Number(quantity) || 1));
+  const slippageRate = preferences.slippageBps / 10_000;
+  const feeRate = preferences.feeBps / 10_000;
+  const buyPrice = price * (1 + slippageRate);
+  const sellPrice = price * (1 - slippageRate);
+  const estimatedBuyFee = buyPrice * safeQuantity * feeRate;
+  const estimatedBuyTotal = buyPrice * safeQuantity + estimatedBuyFee;
+  const canBuy = account.cash[market] >= estimatedBuyTotal;
+  const canSell = (position?.quantity || 0) >= safeQuantity;
+
+  const positionRows = account.positions.map((item) => {
+    const quote = liveQuotes[item.key];
+    const mark = item.key === currentKey ? price : quote?.price || item.averagePrice;
+    const value = mark * item.quantity;
+    const pnl = (mark - item.averagePrice) * item.quantity;
+    return { ...item, mark, value, pnl };
+  });
+  const marketPositions = positionRows.filter((item) => item.market === market);
+  const positionValue = marketPositions.reduce((sum, item) => sum + item.value, 0);
+  const unrealizedPnl = marketPositions.reduce((sum, item) => sum + item.pnl, 0);
+  const equity = account.cash[market] + positionValue;
+  const initialCapital = DEFAULT_PAPER_ACCOUNT.cash[market];
+  const totalReturn = ((equity - initialCapital) / initialCapital) * 100;
+
+  const submitOrder = (side: 'BUY' | 'SELL') => {
+    const executionPrice = side === 'BUY' ? buyPrice : sellPrice;
+    const notional = executionPrice * safeQuantity;
+    const fee = notional * feeRate;
+    if (side === 'BUY' && !canBuy) {
+      setMessage('주문 가능 현금이 부족합니다.');
+      return;
+    }
+    if (side === 'SELL' && !canSell) {
+      setMessage('보유 수량을 초과해 매도할 수 없습니다.');
+      return;
+    }
+    setAccount((previous) => {
+      const existing = previous.positions.find((item) => item.key === currentKey);
+      const oldQuantity = existing?.quantity || 0;
+      const nextQuantity = side === 'BUY' ? oldQuantity + safeQuantity : oldQuantity - safeQuantity;
+      const realizedPnl = side === 'SELL' && existing
+        ? (executionPrice - existing.averagePrice) * safeQuantity - fee
+        : 0;
+      const averagePrice = side === 'BUY'
+        ? ((existing?.averagePrice || 0) * oldQuantity + executionPrice * safeQuantity) / nextQuantity
+        : existing?.averagePrice || executionPrice;
+      const nextPosition: PaperPosition = {
+        key: currentKey,
+        market,
+        symbol: current.code,
+        name: current.name,
+        currency: current.currency,
+        quantity: nextQuantity,
+        averagePrice,
+      };
+      const positions = previous.positions
+        .filter((item) => item.key !== currentKey)
+        .concat(nextQuantity > 0 ? [nextPosition] : []);
+      const fill: PaperFill = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        market,
+        symbol: current.code,
+        side,
+        quantity: safeQuantity,
+        price: executionPrice,
+        fee,
+        realizedPnl,
+        filledAt: new Date().toISOString(),
+      };
+      return {
+        cash: {
+          ...previous.cash,
+          [market]: previous.cash[market] + (side === 'BUY' ? -notional - fee : notional - fee),
+        },
+        positions,
+        fills: [fill, ...previous.fills].slice(0, 100),
+      };
+    });
+    setMessage(`${current.code} ${safeQuantity.toLocaleString()}주 ${side === 'BUY' ? '매수' : '매도'} 체결`);
+  };
+
+  const resetAccount = () => {
+    if (!window.confirm('모든 모의 포지션과 체결 기록을 초기화할까요?')) return;
+    setAccount(DEFAULT_PAPER_ACCOUNT);
+    setMessage('모의계좌를 초기 상태로 되돌렸습니다.');
+  };
+
+  return (
+    <section className="paper-layout">
+      <div className="paper-summary-grid">
+        <article className="paper-balance-card primary-card">
+          <div><Landmark size={17} /><span>{market === 'US' ? '미국' : '한국'} 모의계좌</span></div>
+          <strong>{formatMoney(equity, market)}</strong>
+          <small>총 평가자산</small>
+        </article>
+        <article className="paper-balance-card"><span>주문 가능 현금</span><strong>{formatMoney(account.cash[market], market)}</strong><small>실제 자금과 무관</small></article>
+        <article className="paper-balance-card"><span>보유자산</span><strong>{formatMoney(positionValue, market)}</strong><small>{marketPositions.length}개 종목</small></article>
+        <article className="paper-balance-card"><span>평가손익</span><strong className={unrealizedPnl >= 0 ? 'positive' : 'negative'}>{formatMoney(unrealizedPnl, market)}</strong><small className={totalReturn >= 0 ? 'positive' : 'negative'}>{totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%</small></article>
+      </div>
+
+      <div className="paper-main-grid">
+        <section className="panel paper-order-panel">
+          <div className="panel-title"><span>시장가 모의주문</span><small>수수료·슬리피지 반영</small></div>
+          <div className="paper-symbol-head">
+            <div><b>{current.code}</b><span>{current.name}</span></div>
+            <strong>{current.currency}{formatPrice(price, market)}</strong>
+          </div>
+          <label className="paper-quantity">주문 수량<input type="number" min="1" step="1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label>
+          <div className="paper-order-estimate">
+            <div><span>예상 주문금액</span><b>{formatMoney(estimatedBuyTotal, market)}</b></div>
+            <div><span>예상 수수료</span><b>{formatMoney(estimatedBuyFee, market)}</b></div>
+            <div><span>보유 수량</span><b>{(position?.quantity || 0).toLocaleString()}주</b></div>
+          </div>
+          <div className="paper-order-actions">
+            <button className="paper-buy" disabled={!canBuy} onClick={() => submitOrder('BUY')}><ArrowDownToLine size={16} /> 시장가 매수</button>
+            <button className="paper-sell" disabled={!canSell} onClick={() => submitOrder('SELL')}><ArrowUpFromLine size={16} /> 시장가 매도</button>
+          </div>
+          <p className="paper-order-message">{message}</p>
+          <div className="paper-safety"><ShieldCheck size={16} /><p><strong>모의 체결 전용</strong> 실제 증권사로 주문을 보내지 않으며, 현재 표시 시세에 설정된 비용을 더해 즉시 체결합니다.</p></div>
+        </section>
+
+        <section className="panel paper-portfolio-panel">
+          <div className="panel-title"><span>보유 포지션</span><small>시세에 따라 자동 평가</small></div>
+          {marketPositions.length ? <div className="paper-table-scroll"><table><thead><tr><th>종목</th><th>수량</th><th>평균단가</th><th>현재가</th><th>평가금액</th><th>평가손익</th></tr></thead><tbody>{marketPositions.map((item) => <tr key={item.key}><td><b>{item.symbol}</b><small>{item.name}</small></td><td>{item.quantity.toLocaleString()}주</td><td>{formatPrice(item.averagePrice, item.market)}</td><td>{formatPrice(item.mark, item.market)}</td><td>{formatMoney(item.value, item.market)}</td><td className={item.pnl >= 0 ? 'positive' : 'negative'}>{formatMoney(item.pnl, item.market)}</td></tr>)}</tbody></table></div> : <div className="paper-empty"><WalletCards size={28} /><strong>아직 보유 포지션이 없습니다</strong><p>왼쪽 주문창에서 첫 모의주문을 체결해보세요.</p></div>}
+        </section>
+      </div>
+
+      <section className="panel paper-history-panel">
+        <div className="panel-title"><span>최근 체결</span><button className="paper-reset" onClick={resetAccount}><RotateCcw size={13} /> 계좌 초기화</button></div>
+        {account.fills.filter((fill) => fill.market === market).length ? <div className="paper-table-scroll"><table><thead><tr><th>체결시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>실현손익</th></tr></thead><tbody>{account.fills.filter((fill) => fill.market === market).slice(0, 12).map((fill) => <tr key={fill.id}><td>{new Date(fill.filledAt).toLocaleString('ko-KR')}</td><td><b>{fill.symbol}</b></td><td><span className={fill.side === 'BUY' ? 'fill-buy' : 'fill-sell'}>{fill.side === 'BUY' ? '매수' : '매도'}</span></td><td>{fill.quantity.toLocaleString()}주</td><td>{formatPrice(fill.price, fill.market)}</td><td>{formatMoney(fill.fee, fill.market)}</td><td className={fill.realizedPnl >= 0 ? 'positive' : 'negative'}>{fill.side === 'SELL' ? formatMoney(fill.realizedPnl, fill.market) : '-'}</td></tr>)}</tbody></table></div> : <div className="paper-empty compact"><ReceiptText size={22} /><p>체결 기록이 없습니다.</p></div>}
+      </section>
+    </section>
+  );
+}
+
 export default function Home() {
   const [market, setMarket] = useState<Market>('US');
   const [symbol, setSymbol] = useState('ONDS');
-  const [tab, setTab] = useState<'analysis' | 'backtest'>('analysis');
+  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest'>('analysis');
   const [data, setData] = useState<Candle[]>(() => demo());
   const [higherTimeframeData, setHigherTimeframeData] =
     useState<HigherTimeframeData>({});
@@ -1882,6 +2186,8 @@ export default function Home() {
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     structure: true,
+    choch: true,
+    swingLabels: true,
     premiumDiscount: true,
     internalStructure: true,
     volume: true,
@@ -1891,6 +2197,8 @@ export default function Home() {
     forecast: true,
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedEntryStep, setSelectedEntryStep] =
+    useState<MultiTimeframeEntryStep | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [watchlist, setWatchlist] =
@@ -2031,6 +2339,22 @@ export default function Home() {
         ),
       ) as Record<Timeframe, Snapshot>,
     [timeframeData],
+  );
+  const entryAnalyses = useMemo(
+    () => ({
+      '5m': analyze(timeframeData['5m']),
+      '15m': analyze(timeframeData['15m']),
+      '1H': analyze(timeframeData['1H']),
+    }),
+    [timeframeData],
+  );
+  const multiTimeframeEntry = useMemo(
+    () =>
+      evaluateMultiTimeframeEntry({
+        snapshots: timeframeSnapshots,
+        analyses: entryAnalyses,
+      }),
+    [entryAnalyses, timeframeSnapshots],
   );
   const selectedDirection = directionLabel(analysis.bias);
   const timeframeContext = multiTimeframeContext(
@@ -2423,7 +2747,9 @@ export default function Home() {
   );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
     { key: 'structure', label: '스윙구조' },
-    { key: 'premiumDiscount', label: 'P/D 영역' },
+    { key: 'choch', label: 'CHOCH' },
+    { key: 'swingLabels', label: 'HH·HL·LH·LL' },
+    { key: 'premiumDiscount', label: 'Premium/Discount' },
     { key: 'internalStructure', label: '내부구조' },
     { key: 'volume', label: '거래량' },
     { key: 'volumeProfile', label: 'VP' },
@@ -2452,6 +2778,12 @@ export default function Home() {
             onClick={() => setTab('analysis')}
           >
             분석 대시보드
+          </button>
+          <button
+            className={tab === 'paper' ? 'active' : ''}
+            onClick={() => setTab('paper')}
+          >
+            모의투자
           </button>
           <button
             className={tab === 'backtest' ? 'active' : ''}
@@ -2663,15 +2995,11 @@ export default function Home() {
                 </span>
               </div>
               <h1>
-                {analysis.entryForecast.status === 'READY'
-                  ? `${selectedDirection} 조건 충족`
-                  : analysis.entryForecast.status === 'WAIT'
-                    ? `${selectedDirection} 구간 대기`
-                    : `${selectedDirection} 보류`}
+                {multiTimeframeEntry.summary}
               </h1>
               <p>
                 {timeframeSnapshots[timeframe].event} · {timeframeContext} ·
-                구조·위치·추세·손익비 조건부 예측
+                실행 기준 {multiTimeframeEntry.entryTimeframe}
               </p>
             </div>
             <div className="metric">
@@ -2870,6 +3198,43 @@ export default function Home() {
                   <i /> CALCULATED
                 </small>
               </div>
+              <article
+                className={`plan multi-timeframe-entry ${multiTimeframeEntry.status.toLowerCase()}`}
+              >
+                <header>
+                  <span>
+                    <Activity size={15} /> 멀티 타임프레임 진입
+                  </span>
+                  <b>{multiTimeframeEntry.status}</b>
+                </header>
+                <h3>{multiTimeframeEntry.summary}</h3>
+                <p>1D 방향부터 5m 실행 트리거까지 순서대로 확인합니다.</p>
+                <ol className="entry-gate-steps">
+                  {multiTimeframeEntry.steps.map((step) => (
+                    <li key={step.timeframe} className={step.state.toLowerCase()}>
+                      <button
+                        type="button"
+                        className="entry-gate-button"
+                        onClick={() => setSelectedEntryStep(step)}
+                        aria-label={`${step.timeframe} ${step.label} 근거 자세히 보기`}
+                      >
+                        <strong>{step.timeframe}</strong>
+                        <div>
+                          <b>{step.label}</b>
+                          <small>{step.detail}</small>
+                        </div>
+                        <span>
+                          {step.state === 'PASS'
+                            ? '충족'
+                            : step.state === 'BLOCK'
+                              ? '차단'
+                              : '대기'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </article>
               <article className="plan early forecast-plan">
                 <header>
                   <span>
@@ -2990,6 +3355,14 @@ export default function Home() {
             </aside>
           </section>
         </>
+      ) : tab === 'paper' ? (
+        <PaperTrading
+          market={market}
+          current={current}
+          price={displayedPrice}
+          liveQuotes={liveQuotes}
+          preferences={preferences}
+        />
       ) : (
         <section className="backtest-layout">
           <aside className="panel strategy">
@@ -3298,6 +3671,114 @@ export default function Home() {
         <span>STRUCTUREFLOW · 계산 기반 의사결정 지원</span>
         <span>투자 권유 또는 자동 주문 시스템이 아닙니다.</span>
       </footer>
+
+      <Dialog
+        open={Boolean(selectedEntryStep)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEntryStep(null);
+        }}
+      >
+        <DialogContent className="entry-reason-dialog">
+          {selectedEntryStep && (
+            <>
+              <DialogHeader>
+                <div className="entry-reason-heading">
+                  <span>{selectedEntryStep.timeframe}</span>
+                  <div>
+                    <DialogTitle>{selectedEntryStep.label}</DialogTitle>
+                    <DialogDescription>
+                      {entryLessons[selectedEntryStep.timeframe].role}
+                    </DialogDescription>
+                  </div>
+                  <b className={selectedEntryStep.state.toLowerCase()}>
+                    {selectedEntryStep.state === 'PASS'
+                      ? '충족'
+                      : selectedEntryStep.state === 'BLOCK'
+                        ? '차단'
+                        : '대기'}
+                  </b>
+                </div>
+              </DialogHeader>
+
+              <div className="entry-reason-current">
+                <div>
+                  <small>현재 차트 판정</small>
+                  <strong>{selectedEntryStep.detail}</strong>
+                </div>
+                <dl>
+                  <div>
+                    <dt>추세</dt>
+                    <dd>
+                      {timeframeSnapshots[selectedEntryStep.timeframe].trend}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>구조 이벤트</dt>
+                    <dd>
+                      {timeframeSnapshots[selectedEntryStep.timeframe].event}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>구조 점수</dt>
+                    <dd>
+                      {timeframeSnapshots[selectedEntryStep.timeframe].score}
+                      /100
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <section className="entry-reason-section principle">
+                <small>STRUCTUREFLOW 판단 기준</small>
+                <h3>높은 시간대에서 이야기를 만들고 아래로 좁혀갑니다</h3>
+                <p>{entryLessons[selectedEntryStep.timeframe].principle}</p>
+              </section>
+
+              <div className="entry-reason-grid">
+                <section className="entry-reason-section">
+                  <small>왜 지금 이 판정인가</small>
+                  <h3>
+                    {selectedEntryStep.state === 'PASS'
+                      ? '현재 단계의 조건은 확인됐습니다'
+                      : selectedEntryStep.state === 'BLOCK'
+                        ? '시간대 방향 충돌로 진입하지 않습니다'
+                        : '확인 전에는 예측 진입하지 않습니다'}
+                  </h3>
+                  <p>
+                    {selectedEntryStep.state === 'PASS'
+                      ? '이 단계는 통과했지만 전체 진입은 4H·15m·5m가 같은 방향으로 정렬되고 실행 트리거까지 나와야 준비 상태가 됩니다.'
+                      : selectedEntryStep.state === 'BLOCK'
+                        ? '상위 편향에 집착하지 않고 하위 구조의 실제 발전을 관찰합니다. 반대 방향이 지속되면 편향 변경도 허용합니다.'
+                        : '낮은 시간대가 높은 시간대 편향과 같은 방향으로 정렬되기를 기다린 뒤 진입합니다.'}
+                  </p>
+                </section>
+                <section className="entry-reason-section">
+                  <small>확인 체크리스트</small>
+                  <ul>
+                    {entryLessons[selectedEntryStep.timeframe].checks.map(
+                      (check) => (
+                        <li key={check}>{check}</li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              </div>
+
+              <div className="entry-reason-next">
+                <div>
+                  <small>다음 확인</small>
+                  <p>{entryLessons[selectedEntryStep.timeframe].next}</p>
+                </div>
+                <div>
+                  <small>무효화·재평가</small>
+                  <p>{entryLessons[selectedEntryStep.timeframe].invalidation}</p>
+                </div>
+              </div>
+
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={watchlistOpen} onOpenChange={setWatchlistOpen}>
         <DialogContent className="watchlist-dialog">
