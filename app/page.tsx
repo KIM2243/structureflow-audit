@@ -549,7 +549,7 @@ function loadPreferences(): Preferences {
 
 const DEMO_END_TIMESTAMP = Date.UTC(2025, 0, 2, 0, 0, 0);
 
-function demo(base = 10, count = 1_200): Candle[] {
+function demo(base = 10, count = 2_400): Candle[] {
   let last = base * 0.7;
   return Array.from({ length: count }, (_, index) => {
     const open = last;
@@ -2560,7 +2560,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         const nativeTimeframes: Timeframe[] = ['15m', '1H', '4H', '1D'];
         if (
           nativeTimeframes.some(
-            (name) => !payload.timeframes?.[name]?.length,
+            (name) => (payload.timeframes?.[name]?.length || 0) < 20,
           )
         ) {
           throw new Error('키움 시간봉 데이터가 모두 준비되지 않았습니다.');
@@ -2759,7 +2759,11 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       setData(candles);
       setHigherTimeframeData({});
       setDataSource('csv');
-      setTimeframe('1D');
+      setTimeframe(
+        resampleBySession(candles, timeframeSizes['1D']).length >= 20
+          ? '1D'
+          : '5m',
+      );
       setStatus(
         `${file.name} · ${candles.length.toLocaleString()}개 캔들 · 계산 완료`,
       );
