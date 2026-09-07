@@ -24,6 +24,8 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  UserCog,
+  LogOut,
   ShieldCheck,
   SlidersHorizontal,
   Target,
@@ -70,6 +72,7 @@ import {
 import { getRecentSwingRange } from '@/lib/swing-range';
 
 type Market = 'US' | 'KR';
+type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
 type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
@@ -214,11 +217,41 @@ const symbols: Record<Market, SymbolItem[]> = {
       currency: '$',
       exchange: 'ND',
     },
+    { code: 'AAPL', feed: 'AAPL', name: 'Apple 애플', currency: '$', exchange: 'ND' },
+    { code: 'MSFT', feed: 'MSFT', name: 'Microsoft 마이크로소프트', currency: '$', exchange: 'ND' },
+    { code: 'AMZN', feed: 'AMZN', name: 'Amazon 아마존', currency: '$', exchange: 'ND' },
+    { code: 'GOOGL', feed: 'GOOGL', name: 'Alphabet 구글', currency: '$', exchange: 'ND' },
+    { code: 'META', feed: 'META', name: 'Meta Platforms 메타', currency: '$', exchange: 'ND' },
+    { code: 'AMD', feed: 'AMD', name: 'AMD', currency: '$', exchange: 'ND' },
+    { code: 'NFLX', feed: 'NFLX', name: 'Netflix 넷플릭스', currency: '$', exchange: 'ND' },
+    { code: 'AVGO', feed: 'AVGO', name: 'Broadcom 브로드컴', currency: '$', exchange: 'ND' },
+    { code: 'PLTR', feed: 'PLTR', name: 'Palantir 팔란티어', currency: '$', exchange: 'ND' },
+    { code: 'COIN', feed: 'COIN', name: 'Coinbase 코인베이스', currency: '$', exchange: 'ND' },
+    { code: 'JPM', feed: 'JPM', name: 'JPMorgan 제이피모건', currency: '$', exchange: 'NY' },
+    { code: 'BRK.B', feed: 'BRK.B', name: 'Berkshire Hathaway 버크셔', currency: '$', exchange: 'NY' },
+    { code: 'DIS', feed: 'DIS', name: 'Walt Disney 디즈니', currency: '$', exchange: 'NY' },
+    { code: 'NKE', feed: 'NKE', name: 'Nike 나이키', currency: '$', exchange: 'NY' },
+    { code: 'KO', feed: 'KO', name: 'Coca-Cola 코카콜라', currency: '$', exchange: 'NY' },
   ],
   KR: [
     { code: '005930', feed: '005930.KS', name: '삼성전자', currency: '₩' },
     { code: '000660', feed: '000660.KS', name: 'SK하이닉스', currency: '₩' },
     { code: '035420', feed: '035420.KS', name: 'NAVER', currency: '₩' },
+    { code: '035720', feed: '035720.KS', name: '카카오', currency: '₩' },
+    { code: '005380', feed: '005380.KS', name: '현대차', currency: '₩' },
+    { code: '000270', feed: '000270.KS', name: '기아', currency: '₩' },
+    { code: '373220', feed: '373220.KS', name: 'LG에너지솔루션', currency: '₩' },
+    { code: '051910', feed: '051910.KS', name: 'LG화학', currency: '₩' },
+    { code: '006400', feed: '006400.KS', name: '삼성SDI', currency: '₩' },
+    { code: '207940', feed: '207940.KS', name: '삼성바이오로직스', currency: '₩' },
+    { code: '068270', feed: '068270.KS', name: '셀트리온', currency: '₩' },
+    { code: '105560', feed: '105560.KS', name: 'KB금융', currency: '₩' },
+    { code: '055550', feed: '055550.KS', name: '신한지주', currency: '₩' },
+    { code: '012450', feed: '012450.KS', name: '한화에어로스페이스', currency: '₩' },
+    { code: '042660', feed: '042660.KS', name: '한화오션', currency: '₩' },
+    { code: '009540', feed: '009540.KS', name: 'HD한국조선해양', currency: '₩' },
+    { code: '005490', feed: '005490.KS', name: 'POSCO홀딩스', currency: '₩' },
+    { code: '034020', feed: '034020.KS', name: '두산에너빌리티', currency: '₩' },
   ],
 };
 
@@ -2171,10 +2204,35 @@ function PaperTrading({
   );
 }
 
-export default function Home() {
+function AuthScreen({setup,onAuthenticated}:{setup:boolean;onAuthenticated:(user:AuthUser)=>void}){
+  const [username,setUsername]=useState(''); const [displayName,setDisplayName]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
+  async function submit(event:React.FormEvent){event.preventDefault();setBusy(true);setError('');const response=await fetch(setup?'/api/auth/setup':'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,displayName,password})});const payload=await response.json() as {user?:AuthUser;error?:string};setBusy(false);if(!response.ok||!payload.user){setError(payload.error||'로그인하지 못했습니다.');return;}onAuthenticated(payload.user);}
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><Activity size={24}/><div><strong>STRUCTURE<span>FLOW</span></strong><small>PRIVATE TRADING WORKSPACE</small></div></div><div className="auth-copy"><small>{setup?'OWNER SETUP':'MEMBER SIGN IN'}</small><h1>{setup?'관리자 계정을 설정하세요':'내 계정으로 로그인'}</h1><p>{setup?'기존 소유자 인증이 확인됐습니다. 이 계정 생성 후에는 ChatGPT 계정 없이 로그인합니다.':'관리자가 등록한 회원만 이용할 수 있습니다.'}</p></div><form onSubmit={submit}>{setup&&<label>표시 이름<input required value={displayName} onChange={e=>setDisplayName(e.target.value)} autoComplete="name"/></label>}<label>아이디<input required minLength={3} value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" placeholder="영문·숫자 3자 이상"/></label><label>비밀번호<input required minLength={12} type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete={setup?'new-password':'current-password'} placeholder="영문·숫자 포함 12자 이상"/></label>{error&&<p className="auth-error">{error}</p>}<button className="primary auth-submit" disabled={busy}>{busy?<Loader2 className="spin" size={16}/>:<ShieldCheck size={16}/>} {setup?'관리자 계정 만들기':'로그인'}</button></form><p className="auth-note">비밀번호는 암호화되어 저장되며 로그인 실패가 반복되면 계정이 잠시 보호됩니다.</p></section></main>;
+}
+
+function AdminPanel({viewer}:{viewer:AuthUser}){
+  const [users,setUsers]=useState<any[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [draft,setDraft]=useState({username:'',displayName:'',password:'',role:'member'});
+  const load=useCallback(async()=>{const r=await fetch('/api/admin/users');const p=await r.json() as any;if(r.ok)setUsers(p.users||[]);else setError(p.error||'회원 목록을 불러오지 못했습니다.');},[]);
+  useEffect(()=>{void load();},[load]);
+  async function create(event:React.FormEvent){event.preventDefault();setError('');setNotice('');const r=await fetch('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});const p=await r.json() as any;if(!r.ok){setError(p.error);return;}setDraft({username:'',displayName:'',password:'',role:'member'});setNotice('새 회원을 등록했습니다.');await load();}
+  async function toggle(user:any){setError('');const r=await fetch('/api/admin/users',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:user.id,action:'status',status:user.status==='active'?'disabled':'active'})});const p=await r.json() as any;if(!r.ok){setError(p.error);return;}await load();}
+  return <section className="admin-layout"><header><div><small>ACCESS CONTROL</small><h1>회원 관리</h1><p>현재 로그인: {viewer.displayName} · 관리자</p></div><span>{users.filter(u=>u.status==='active').length}명 활성</span></header><div className="admin-grid"><section className="panel member-create"><div className="panel-title"><span>새 회원 등록</span><small>관리자 승인 방식</small></div><form onSubmit={create}><label>표시 이름<input required value={draft.displayName} onChange={e=>setDraft({...draft,displayName:e.target.value})}/></label><label>아이디<input required minLength={3} value={draft.username} onChange={e=>setDraft({...draft,username:e.target.value})}/></label><label>임시 비밀번호<input required minLength={12} type="password" value={draft.password} onChange={e=>setDraft({...draft,password:e.target.value})}/><small>영문과 숫자를 포함한 12자 이상</small></label><label>권한<select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value})}><option value="member">일반 회원</option><option value="admin">관리자</option></select></label><button className="primary"><UserCog size={16}/> 회원 등록</button>{notice&&<p className="auth-success">{notice}</p>}{error&&<p className="auth-error">{error}</p>}</form></section><section className="panel member-list"><div className="panel-title"><span>등록 회원</span><small>접근 차단 가능</small></div><div className="member-table"><table><thead><tr><th>회원</th><th>권한</th><th>상태</th><th>마지막 로그인</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}><td><b>{user.displayName}</b><small>{user.username}</small></td><td>{user.role==='admin'?'관리자':'회원'}</td><td><span className={`member-status ${user.status}`}>{user.status==='active'?'활성':'차단'}</span></td><td>{user.lastLoginAt?new Date(user.lastLoginAt).toLocaleString('ko-KR'):'-'}</td><td><button disabled={user.id===viewer.id} onClick={()=>toggle(user)}>{user.status==='active'?'접근 차단':'다시 활성화'}</button></td></tr>)}</tbody></table></div></section></div></section>;
+}
+
+export default function Home(){
+  const [state,setState]=useState<{loading:boolean;setup:boolean;user:AuthUser|null}>({loading:true,setup:false,user:null});
+  useEffect(()=>{fetch('/api/auth/status').then(r=>r.json()).then((p:any)=>setState({loading:false,setup:Boolean(p.setupRequired),user:p.user||null})).catch(()=>setState({loading:false,setup:false,user:null}));},[]);
+  if(state.loading)return <main className="auth-page"><Loader2 className="spin"/></main>;
+  if(!state.user)return <AuthScreen setup={state.setup} onAuthenticated={user=>setState({loading:false,setup:false,user})}/>;
+  return <Dashboard viewer={state.user} onLogout={()=>setState({loading:false,setup:false,user:null})}/>;
+}
+
+function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [market, setMarket] = useState<Market>('US');
   const [symbol, setSymbol] = useState('ONDS');
-  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest'>('analysis');
+  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'admin'>('analysis');
+  const [symbolQuery,setSymbolQuery]=useState('');
   const [data, setData] = useState<Candle[]>(() => demo());
   const [higherTimeframeData, setHigherTimeframeData] =
     useState<HigherTimeframeData>({});
@@ -2791,8 +2849,10 @@ export default function Home() {
           >
             백테스트
           </button>
+          {viewer.role === 'admin' && <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>회원 관리</button>}
         </nav>
         <div className="top-actions">
+          <span className="viewer-name">{viewer.displayName}</span>
           <button
             className="icon-btn"
             onClick={openSettings}
@@ -2813,6 +2873,7 @@ export default function Home() {
             accept=".csv,text/csv"
             onChange={(event) => uploadCsv(event.target.files?.[0])}
           />
+          <button className="icon-btn" aria-label="로그아웃" onClick={async()=>{await fetch('/api/auth/logout',{method:'POST'});onLogout();}}><LogOut size={16}/></button>
         </div>
       </header>
 
@@ -2831,20 +2892,10 @@ export default function Home() {
             🇰🇷 한국
           </button>
         </div>
-        <label className="symbol-picker">
+        <label className="symbol-picker searchable">
           <Search size={16} />
-          <select
-            value={symbol}
-            onChange={(event) => chooseSymbol(event.target.value)}
-            aria-label="종목 선택"
-          >
-            {availableSymbols.map((item) => (
-              <option key={item.code} value={item.code}>
-                {item.code} · {item.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={15} />
+          <input value={symbolQuery} list="symbol-results" aria-label="종목 이름·티커·코드 검색" placeholder={`${current.code} · ${current.name}`} onChange={(event)=>{const value=event.target.value;setSymbolQuery(value);const code=value.split(' · ')[0].trim().toUpperCase();if(availableSymbols.some(item=>item.code===code)){chooseSymbol(code);setSymbolQuery('');}}} onKeyDown={(event)=>{if(event.key==='Enter'){event.preventDefault();const q=symbolQuery.trim().toLowerCase();const found=availableSymbols.find(item=>item.code.toLowerCase()===q||item.name.toLowerCase().includes(q));if(found){chooseSymbol(found.code);setSymbolQuery('');}}}} />
+          <datalist id="symbol-results">{availableSymbols.filter(item=>{const q=symbolQuery.trim().toLowerCase();return !q||item.code.toLowerCase().includes(q)||item.name.toLowerCase().includes(q);}).map(item=><option key={`${market}-${item.code}`} value={`${item.code} · ${item.name}`}/>)}</datalist>
         </label>
         <button
           className="primary"
@@ -3363,6 +3414,8 @@ export default function Home() {
           liveQuotes={liveQuotes}
           preferences={preferences}
         />
+      ) : tab === 'admin' ? (
+        <AdminPanel viewer={viewer}/>
       ) : (
         <section className="backtest-layout">
           <aside className="panel strategy">

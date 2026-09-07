@@ -9,6 +9,7 @@ import {
   fetchFromKiwoomBridge,
   isKiwoomBridgeConfigured,
 } from '@/lib/bridge';
+import { getUser } from '@/lib/auth';
 
 const REQUEST_STAGGER_MS = 1_100;
 
@@ -77,6 +78,7 @@ async function fetchStaggeredQuote(
 }
 
 export async function GET(request: Request) {
+  if (!await getUser(request)) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
   const url = new URL(request.url);
   if (isKiwoomBridgeConfigured()) {
     try {
