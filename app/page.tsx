@@ -476,12 +476,12 @@ function normalizeWatchlistEntry(entry: WatchlistEntry): WatchedSymbol | null {
   };
 }
 
-function loadWatchlist() {
-  if (typeof window === 'undefined') return DEFAULT_WATCHLIST;
+function loadLegacyWatchlist() {
+  if (typeof window === 'undefined') return null;
   try {
-    const saved = JSON.parse(
-      window.localStorage.getItem('structureflow:watchlist') || '[]',
-    ) as WatchlistEntry[];
+    const raw = window.localStorage.getItem('structureflow:watchlist');
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as WatchlistEntry[];
     const marketCounts: Record<Market, number> = { US: 0, KR: 0 };
     const valid = saved
       .slice(0, MAX_WATCHLIST_SIZE)
@@ -491,9 +491,9 @@ function loadWatchlist() {
         marketCounts[entry.market] += 1;
         return true;
       });
-    return valid.length ? valid : DEFAULT_WATCHLIST;
+    return valid.length ? valid : null;
   } catch {
-    return DEFAULT_WATCHLIST;
+    return null;
   }
 }
 
@@ -2313,7 +2313,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     useState<WatchlistEntry[]>(DEFAULT_WATCHLIST);
   const [watchlistDraft, setWatchlistDraft] =
     useState<WatchlistEntry[]>(DEFAULT_WATCHLIST);
+  const [watchlistMarket, setWatchlistMarket] = useState<Market>('US');
   const [watchlistError, setWatchlistError] = useState('');
+  const [watchlistSaving, setWatchlistSaving] = useState(false);
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
   const [liveErrors, setLiveErrors] = useState<Record<string, LiveQuoteError>>(
     {},
@@ -2352,11 +2354,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const initialLoadStarted = useRef(false);
 
   useEffect(() => {
-    const restoreSavedSettings = window.setTimeout(() => {
-      const savedWatchlist = loadWatchlist();
+    let cancelled = false;
+    const restoreSavedSettings = async () => {
       const savedPreferences = loadPreferences();
-      setWatchlist(savedWatchlist);
-      setWatchlistDraft(savedWatchlist);
       setPreferences(savedPreferences);
       setSettingsDraft(savedPreferences);
       setAppliedBacktest((currentOptions) => ({
@@ -2366,10 +2366,37 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         feeBps: savedPreferences.feeBps,
         slippageBps: savedPreferences.slippageBps,
       }));
-      setStorageReady(true);
-    }, 0);
-    return () => window.clearTimeout(restoreSavedSettings);
-  }, []);
+      try {
+        const response = await fetch('/api/watchlist', { cache: 'no-store' });
+        const payload = await response.json() as { items?: WatchlistEntry[]; configured?: boolean; error?: string };
+        if (!response.ok || !payload.items) throw new Error(payload.error || '관심종목을 불러오지 못했습니다.');
+        let savedWatchlist = payload.items;
+        const legacy = !payload.configured ? loadLegacyWatchlist() : null;
+        if (legacy) {
+          const migration = await fetch('/api/watchlist', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: legacy }),
+          });
+          const migrated = await migration.json() as { items?: WatchlistEntry[] };
+          if (migration.ok && migrated.items) {
+            savedWatchlist = migrated.items;
+            window.localStorage.removeItem('structureflow:watchlist');
+          }
+        }
+        if (!cancelled) {
+          setWatchlist(savedWatchlist);
+          setWatchlistDraft(savedWatchlist);
+        }
+      } catch (error) {
+        if (!cancelled) setStatus(error instanceof Error ? error.message : '관심종목을 불러오지 못했습니다.');
+      } finally {
+        if (!cancelled) setStorageReady(true);
+      }
+    };
+    void restoreSavedSettings();
+    return () => { cancelled = true; };
+  }, [viewer.id]);
 
   useEffect(
     () => () => {
@@ -2693,10 +2720,11 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   };
 
   const chooseWatchlistSymbol = (index: number, item: SymbolSearchResult) => {
+    if (item.market !== watchlistMarket) return;
     setWatchlistDraft((draft) => draft.map((entry, itemIndex) => itemIndex === index ? {
-      market: item.market,
+      market: watchlistMarket,
       ticker: item.feed,
-      ...(item.market === 'US' ? { exchange: item.exchange || 'ND' } : {}),
+      ...(watchlistMarket === 'US' ? { exchange: item.exchange || 'ND' } : {}),
     } : entry));
   };
 
@@ -2708,11 +2736,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
 
   const openWatchlistSettings = () => {
     setWatchlistDraft(watchlist.length ? watchlist : DEFAULT_WATCHLIST);
+    setWatchlistMarket(market);
     setWatchlistError('');
     setWatchlistOpen(true);
   };
 
-  const saveWatchlist = () => {
+  const saveWatchlist = async () => {
     const cleaned = watchlistDraft
       .map((entry) => ({ ...entry, ticker: entry.ticker.trim().toUpperCase() }))
       .filter((entry) => entry.ticker);
@@ -2740,15 +2769,27 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       ticker: item!.feed,
       ...(item!.market === 'US' ? { exchange: item!.exchange || 'ND' } : {}),
     }));
-    setWatchlist(saved);
-    setLiveQuotes({});
-    setLiveErrors({});
-    window.localStorage.setItem(
-      'structureflow:watchlist',
-      JSON.stringify(saved),
-    );
-    setWatchlistOpen(false);
-    setStatus('실시간 관심종목을 저장했습니다.');
+    setWatchlistSaving(true);
+    setWatchlistError('');
+    try {
+      const response = await fetch('/api/watchlist', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: saved }),
+      });
+      const payload = await response.json() as { items?: WatchlistEntry[]; error?: string };
+      if (!response.ok || !payload.items) throw new Error(payload.error || '관심종목을 저장하지 못했습니다.');
+      setWatchlist(payload.items);
+      setWatchlistDraft(payload.items);
+      setLiveQuotes({});
+      setLiveErrors({});
+      setWatchlistOpen(false);
+      setStatus(`${viewer.displayName} 계정의 관심종목을 저장했습니다.`);
+    } catch (error) {
+      setWatchlistError(error instanceof Error ? error.message : '관심종목을 저장하지 못했습니다.');
+    } finally {
+      setWatchlistSaving(false);
+    }
   };
 
   const uploadCsv = async (file?: File) => {
@@ -3916,32 +3957,38 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           <DialogHeader>
             <DialogTitle>실시간 관심종목 설정</DialogTitle>
             <DialogDescription>
-              미국과 한국 관심종목을 각각 최대 3개까지 지정하세요. 종목명이나
-              티커를 검색해 선택하면 국가와 거래소가 자동으로 설정됩니다.
+              국가별로 최대 3개까지 지정할 수 있습니다. 현재 로그인한
+              {` ${viewer.displayName}`} 계정에만 저장됩니다.
             </DialogDescription>
           </DialogHeader>
-          <div className="watchlist-editor">
-            {watchlistDraft.map((entry, index) => (
-              <div className="watchlist-editor-row" key={index}>
-                <span>{index + 1}</span>
-                <select
-                  value={entry.market}
-                  aria-label={`관심종목 ${index + 1} 시장`}
-                  onChange={(event) =>
-                    setWatchlistDraft((draft) =>
-                      draft.map((item, itemIndex) =>
-                        itemIndex === index
-                          ? event.target.value === 'US'
-                            ? { market: 'US', ticker: '', exchange: 'ND' }
-                            : { market: 'KR', ticker: '' }
-                          : item,
-                      ),
-                    )
-                  }
+          <div className="watchlist-market-tabs" role="tablist" aria-label="관심종목 국가">
+            {(['US', 'KR'] as const).map((tabMarket) => {
+              const count = watchlistDraft.filter((entry) => entry.market === tabMarket).length;
+              return (
+                <button
+                  key={tabMarket}
+                  type="button"
+                  role="tab"
+                  aria-selected={watchlistMarket === tabMarket}
+                  className={watchlistMarket === tabMarket ? 'active' : ''}
+                  onClick={() => { setWatchlistMarket(tabMarket); setWatchlistError(''); }}
                 >
-                  <option value="US">미국</option>
-                  <option value="KR">한국</option>
-                </select>
+                  <span>{tabMarket === 'US' ? 'US 미국' : 'KR 한국'}</span>
+                  <small>{count}/3</small>
+                </button>
+              );
+            })}
+          </div>
+          <div className="watchlist-country-lock">
+            <span>{watchlistMarket === 'US' ? '미국 종목만 검색·저장' : '한국 종목만 검색·저장'}</span>
+            <small>국가는 현재 탭으로 고정됩니다.</small>
+          </div>
+          <div className="watchlist-editor">
+            {watchlistDraft.map((entry, index) => ({ entry, index }))
+              .filter(({ entry }) => entry.market === watchlistMarket)
+              .map(({ entry, index }, marketIndex) => (
+              <div className="watchlist-editor-row" key={`${entry.market}-${index}`}>
+                <span>{marketIndex + 1}</span>
                 {entry.market === 'US' ? (
                   <select
                     value={entry.exchange || 'ND'}
@@ -3973,6 +4020,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 )}
                 <SymbolSearchBox
                   compact
+                  market={watchlistMarket}
                   value={entry.ticker}
                   placeholder="한글·영문 종목명 또는 티커"
                   onValueChange={(value) => setWatchlistDraft((draft) => draft.map((item,itemIndex) => itemIndex === index ? {...item,ticker:value.toUpperCase()} : item))}
@@ -3992,24 +4040,27 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 </button>
               </div>
             ))}
+            {!watchlistDraft.some((entry) => entry.market === watchlistMarket) && (
+              <div className="watchlist-empty">등록된 {watchlistMarket === 'US' ? '미국' : '한국'} 종목이 없습니다.</div>
+            )}
           </div>
           <button
             type="button"
             className="add-watch-symbol"
-            disabled={watchlistDraft.length >= MAX_WATCHLIST_SIZE || watchlistDraft.filter((entry) => entry.market === market).length >= MAX_WATCHLIST_PER_MARKET}
+            disabled={watchlistDraft.length >= MAX_WATCHLIST_SIZE || watchlistDraft.filter((entry) => entry.market === watchlistMarket).length >= MAX_WATCHLIST_PER_MARKET}
             onClick={() =>
               setWatchlistDraft((draft) => [
                 ...draft,
-                market === 'US'
+                watchlistMarket === 'US'
                   ? { market: 'US', ticker: '', exchange: 'ND' }
                   : { market: 'KR', ticker: '' },
               ])
             }
           >
             <Plus size={14} />
-            {watchlistDraft.filter((entry) => entry.market === market).length >= MAX_WATCHLIST_PER_MARKET
-              ? `${market === 'US' ? '미국' : '한국'} 3개 등록됨`
-              : `${market === 'US' ? '미국' : '한국'} 종목 추가`}
+            {watchlistDraft.filter((entry) => entry.market === watchlistMarket).length >= MAX_WATCHLIST_PER_MARKET
+              ? `${watchlistMarket === 'US' ? '미국' : '한국'} 3개 등록됨`
+              : `${watchlistMarket === 'US' ? '미국' : '한국'} 종목 추가`}
           </button>
           {watchlistError && (
             <p className="watchlist-error">{watchlistError}</p>
@@ -4025,8 +4076,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             </div>
           </div>
           <DialogFooter className="settings-footer">
-            <button type="button" className="primary" onClick={saveWatchlist}>
-              관심종목 저장
+            <button type="button" className="primary" disabled={watchlistSaving} onClick={() => void saveWatchlist()}>
+              {watchlistSaving ? '저장 중…' : '계정에 관심종목 저장'}
             </button>
           </DialogFooter>
         </DialogContent>

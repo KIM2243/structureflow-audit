@@ -8,6 +8,13 @@
       "when": 1788740400000,
       "tag": "0000_private_members",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788763841409,
+      "tag": "0001_mighty_marvex",
+      "breakpoints": true
     }
   ]
 }

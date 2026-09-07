@@ -1411,6 +1411,10 @@ button:disabled {
   max-width: 480px !important;
   padding: 20px !important;
 }
+.watchlist-dialog {
+  width: min(760px, calc(100vw - 32px)) !important;
+  max-width: 760px !important;
+}
 .settings-dialog [data-slot='dialog-title'],
 .watchlist-dialog [data-slot='dialog-title'] {
   font-size: 17px;
@@ -1429,15 +1433,57 @@ button:disabled {
 .watchlist-editor {
   display: grid;
   gap: 8px;
-  max-height: 330px;
-  overflow-y: auto;
-  padding-right: 3px;
+  min-height: 48px;
 }
 .watchlist-editor-row {
   display: grid;
-  grid-template-columns: 22px 68px 82px 1fr 34px;
+  grid-template-columns: 22px 104px minmax(0, 1fr) 34px;
   align-items: center;
   gap: 7px;
+}
+.watchlist-market-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.watchlist-market-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #2a3545;
+  background: #0a1018;
+  color: #8d9aab;
+  border-radius: 9px;
+  padding: 11px 13px;
+  cursor: pointer;
+  font-weight: 800;
+}
+.watchlist-market-tabs button.active {
+  border-color: #28d59a;
+  background: #10251f;
+  color: #e9fff7;
+  box-shadow: inset 0 -2px #28d59a;
+}
+.watchlist-market-tabs small { color: var(--green); font: 800 10px monospace; }
+.watchlist-country-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #121a24;
+  color: #cad4df;
+  font-size: 11px;
+}
+.watchlist-country-lock small { color: #778599; }
+.watchlist-empty {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  border: 1px dashed #334154;
+  border-radius: 8px;
+  color: #768397;
+  font-size: 11px;
 }
 .watchlist-editor-row > span {
   width: 22px;
