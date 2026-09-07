@@ -2,7 +2,8 @@ import { env } from 'cloudflare:workers';
 
 export type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
 const COOKIE = 'sf_session';
-const ITERATIONS = 180_000;
+// Cloudflare Workers currently caps Web Crypto PBKDF2 at 100,000 iterations.
+const ITERATIONS = 100_000;
 const SESSION_SECONDS = 60 * 60 * 24 * 14;
 
 const enc = new TextEncoder();

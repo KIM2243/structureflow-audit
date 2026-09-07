@@ -6,7 +6,7 @@ export const users = sqliteTable('users', {
   displayName: text('display_name').notNull(),
   passwordHash: text('password_hash').notNull(),
   passwordSalt: text('password_salt').notNull(),
-  passwordIterations: integer('password_iterations').notNull().default(180000),
+  passwordIterations: integer('password_iterations').notNull().default(100000),
   role: text('role', { enum: ['admin', 'member'] }).notNull().default('member'),
   status: text('status', { enum: ['active', 'disabled'] }).notNull().default('active'),
   failedAttempts: integer('failed_attempts').notNull().default(0),

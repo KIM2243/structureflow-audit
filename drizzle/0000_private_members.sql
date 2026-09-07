@@ -4,7 +4,7 @@ CREATE TABLE `users` (
 	`display_name` text NOT NULL,
 	`password_hash` text NOT NULL,
 	`password_salt` text NOT NULL,
-	`password_iterations` integer DEFAULT 180000 NOT NULL,
+	`password_iterations` integer DEFAULT 100000 NOT NULL,
 	`role` text DEFAULT 'member' NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
 	`failed_attempts` integer DEFAULT 0 NOT NULL,
