@@ -9,6 +9,7 @@ import {
   isKiwoomBridgeConfigured,
 } from '@/lib/bridge';
 import { getUser } from '@/lib/auth';
+import { getYahooMarketChart } from '@/lib/yahoo-market';
 
 const validKrSymbol = /^\d{6}$/;
 const validUsSymbol = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -19,19 +20,18 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   if (isKiwoomBridgeConfigured()) {
     try {
-      return await fetchFromKiwoomBridge(
+      const bridged = await fetchFromKiwoomBridge(
         '/api/market',
         url.searchParams,
         request.signal,
       );
+      if (bridged.ok || bridged.status < 500) return bridged;
+      console.warn(`[bridge] market fallback status=${bridged.status}`);
     } catch (error) {
       console.error(
         `[bridge] market request failed message=${error instanceof Error ? error.message : 'unknown'}`,
       );
-      return Response.json(
-        { error: '키움 시세 브리지에 연결하지 못했습니다.' },
-        { status: 502, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
+      console.warn('[bridge] using market fallback');
     }
   }
   const market = (url.searchParams.get('market') || 'US').toUpperCase();
@@ -54,7 +54,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const chart = await getMarketChart(
+    const chart = isKiwoomBridgeConfigured()
+      ? await getYahooMarketChart(market as KiwoomMarket, symbol)
+      : await getMarketChart(
       {
         market: market as KiwoomMarket,
         symbol,
