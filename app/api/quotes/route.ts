@@ -10,6 +10,7 @@ import {
   isKiwoomBridgeConfigured,
 } from '@/lib/bridge';
 import { getUser } from '@/lib/auth';
+import { getYahooCurrentPrice } from '@/lib/yahoo-market';
 
 const REQUEST_STAGGER_MS = 1_100;
 
@@ -77,26 +78,44 @@ async function fetchStaggeredQuote(
   return getCurrentPrice(item, signal);
 }
 
+type QuotePayload = {
+  quotes?: Awaited<ReturnType<typeof getCurrentPrice>>[];
+  errors?: Array<Record<string, unknown> & { key?: string }>;
+  fetchedAt?: string;
+  refreshAfterSeconds?: number;
+};
+
+async function fillMissingWithYahoo(
+  items: KiwoomQuoteRequest[],
+  payload: QuotePayload,
+  signal: AbortSignal,
+) {
+  const quotes = payload.quotes || [];
+  const quoteKeys = new Set(quotes.map((quote) => quote.key));
+  const missing = items.filter((item) => !quoteKeys.has(quoteRequestKey(item)));
+  if (!missing.length) return payload;
+
+  const settled = await Promise.allSettled(
+    missing.map((item) => getYahooCurrentPrice(item, signal)),
+  );
+  const fallbackQuotes = settled.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
+  );
+  const recoveredKeys = new Set(fallbackQuotes.map((quote) => quote.key));
+  return {
+    ...payload,
+    quotes: [...quotes, ...fallbackQuotes],
+    errors: (payload.errors || []).filter(
+      (error) => !error.key || !recoveredKeys.has(error.key),
+    ),
+    fetchedAt: new Date().toISOString(),
+    refreshAfterSeconds: payload.refreshAfterSeconds || 5,
+  };
+}
+
 export async function GET(request: Request) {
   if (!await getUser(request)) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
   const url = new URL(request.url);
-  if (isKiwoomBridgeConfigured()) {
-    try {
-      return await fetchFromKiwoomBridge(
-        '/api/quotes',
-        url.searchParams,
-        request.signal,
-      );
-    } catch (error) {
-      console.error(
-        `[bridge] quote request failed message=${error instanceof Error ? error.message : 'unknown'}`,
-      );
-      return Response.json(
-        { error: '키움 시세 브리지에 연결하지 못했습니다.' },
-        { status: 502, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
-    }
-  }
   let items: KiwoomQuoteRequest[];
   try {
     items = parseQuoteRequests(url.searchParams.get('items') || '');
@@ -105,6 +124,33 @@ export async function GET(request: Request) {
       { error: publicError(error).error },
       { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
+  }
+  if (isKiwoomBridgeConfigured()) {
+    try {
+      const bridged = await fetchFromKiwoomBridge(
+        '/api/quotes',
+        url.searchParams,
+        request.signal,
+      );
+      const bridgePayload = await bridged.json() as QuotePayload;
+      const payload = await fillMissingWithYahoo(items, bridgePayload, request.signal);
+      const quotes = payload.quotes || [];
+      return Response.json(payload, {
+        status: quotes.length ? 200 : bridged.status,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    } catch (error) {
+      console.error(
+        `[bridge] quote request failed message=${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      const payload = await fillMissingWithYahoo(items, {}, request.signal);
+      if (payload.quotes?.length) {
+        return Response.json(payload, {
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
+      return Response.json({ error: '실시간 시세 제공처에 연결하지 못했습니다.' }, { status: 502, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }
   }
 
   const settled = await Promise.allSettled(

@@ -1,4 +1,5 @@
 import type { Candle } from '@/lib/engine';
+import { quoteRequestKey, type KiwoomQuote, type KiwoomQuoteRequest } from '@/lib/kiwoom';
 
 type YahooChart = {
   chart?: { result?: Array<{ meta?: Record<string, unknown>; timestamp?: number[]; indicators?: { quote?: Array<{ open?: Array<number|null>; high?: Array<number|null>; low?: Array<number|null>; close?: Array<number|null>; volume?: Array<number|null> }> } }> };
@@ -25,6 +26,58 @@ async function load(symbol:string,interval:string,range:string,signal:AbortSigna
   const response=await fetch(url,{headers:{Accept:'application/json','User-Agent':'StructureFlow/1.0'},signal});
   if(!response.ok)throw new Error(`보조 시세 응답 오류 ${response.status}`);
   const payload=await response.json() as YahooChart;if(!payload.chart?.result?.[0])throw new Error('보조 시세에 해당 종목 데이터가 없습니다.');return payload;
+}
+
+function yahooFeed(request: KiwoomQuoteRequest, suffix = 'KS') {
+  return request.market === 'KR' ? `${request.symbol}.${suffix}` : request.symbol;
+}
+
+async function loadQuotePayload(request: KiwoomQuoteRequest, signal: AbortSignal) {
+  if (request.market === 'US') return load(yahooFeed(request), '1m', '1d', signal);
+  try {
+    return await load(yahooFeed(request, 'KS'), '1m', '1d', signal);
+  } catch {
+    return load(yahooFeed(request, 'KQ'), '1m', '1d', signal);
+  }
+}
+
+export async function getYahooCurrentPrice(
+  request: KiwoomQuoteRequest,
+  signal?: AbortSignal,
+): Promise<KiwoomQuote> {
+  const timeout = AbortSignal.timeout(10_000);
+  const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const payload = await loadQuotePayload(request, combinedSignal);
+  const result = payload.chart?.result?.[0];
+  const meta = result?.meta || {};
+  const series = candles(payload);
+  const latest = series.at(-1);
+  const price = Number(meta.regularMarketPrice) || latest?.close || 0;
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error('보조 시세에 현재가가 없습니다.');
+  }
+  const previousClose =
+    Number(meta.regularMarketPreviousClose) ||
+    Number(meta.chartPreviousClose) ||
+    price;
+  const change = price - previousClose;
+  const timestamp = new Date().toISOString();
+  return {
+    key: quoteRequestKey(request),
+    market: request.market,
+    symbol: request.symbol,
+    name: String(meta.longName || meta.shortName || request.symbol),
+    exchange: String(meta.exchangeName || ''),
+    currency: request.market === 'KR' ? 'KRW' : 'USD',
+    price,
+    previousClose,
+    change,
+    changePct: previousClose ? (change / previousClose) * 100 : 0,
+    timestamp,
+    lastUpdated: timestamp,
+    marketState: 'UNKNOWN',
+    status: 'ok',
+  };
 }
 
 export async function getYahooMarketChart(market:'US'|'KR',symbol:string){
