@@ -73,6 +73,16 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(145px, 1fr));
   gap: 7px;
 }
+.watchlist-market-empty {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-height: 70px;
+  border: 1px dashed #283446;
+  border-radius: 8px;
+  color: #748196;
+  font-size: 11px;
+}
 .live-watch-cards > button {
   position: relative;
   min-width: 0;
@@ -1419,6 +1429,9 @@ button:disabled {
 .watchlist-editor {
   display: grid;
   gap: 8px;
+  max-height: 330px;
+  overflow-y: auto;
+  padding-right: 3px;
 }
 .watchlist-editor-row {
   display: grid;

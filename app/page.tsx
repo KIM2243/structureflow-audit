@@ -267,7 +267,8 @@ const DEFAULT_WATCHLIST: WatchlistEntry[] = [
   { market: 'US', ticker: 'TSLA', exchange: 'ND' },
 ];
 
-const MAX_WATCHLIST_SIZE = 3;
+const MAX_WATCHLIST_PER_MARKET = 3;
+const MAX_WATCHLIST_SIZE = MAX_WATCHLIST_PER_MARKET * 2;
 const LIVE_QUOTE_STALE_MS = 15_000;
 const MARKET_DATA_CACHE_TTL_MS = 30_000;
 
@@ -481,9 +482,15 @@ function loadWatchlist() {
     const saved = JSON.parse(
       window.localStorage.getItem('structureflow:watchlist') || '[]',
     ) as WatchlistEntry[];
+    const marketCounts: Record<Market, number> = { US: 0, KR: 0 };
     const valid = saved
       .slice(0, MAX_WATCHLIST_SIZE)
-      .filter((entry) => normalizeWatchlistEntry(entry));
+      .filter((entry) => normalizeWatchlistEntry(entry))
+      .filter((entry) => {
+        if (marketCounts[entry.market] >= MAX_WATCHLIST_PER_MARKET) return false;
+        marketCounts[entry.market] += 1;
+        return true;
+      });
     return valid.length ? valid : DEFAULT_WATCHLIST;
   } catch {
     return DEFAULT_WATCHLIST;
@@ -2226,7 +2233,7 @@ function AdminPanel({viewer}:{viewer:AuthUser}){
   return <section className="admin-layout"><header><div><small>ACCESS CONTROL</small><h1>회원 관리</h1><p>현재 로그인: {viewer.displayName} · 관리자</p></div><span>{users.filter(u=>u.status==='active').length}명 활성</span></header><div className="admin-grid"><section className="panel member-create"><div className="panel-title"><span>새 회원 등록</span><small>관리자 승인 방식</small></div><form onSubmit={create}><label>표시 이름<input required value={draft.displayName} onChange={e=>setDraft({...draft,displayName:e.target.value})}/></label><label>아이디<input required minLength={3} value={draft.username} onChange={e=>setDraft({...draft,username:e.target.value})}/></label><label>임시 비밀번호<input required minLength={12} type="password" value={draft.password} onChange={e=>setDraft({...draft,password:e.target.value})}/><small>영문과 숫자를 포함한 12자 이상</small></label><label>권한<select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value})}><option value="member">일반 회원</option><option value="admin">관리자</option></select></label><button className="primary"><UserCog size={16}/> 회원 등록</button>{notice&&<p className="auth-success">{notice}</p>}{error&&<p className="auth-error">{error}</p>}</form></section><section className="panel member-list"><div className="panel-title"><span>등록 회원</span><small>접근 차단 가능</small></div><div className="member-table"><table><thead><tr><th>회원</th><th>권한</th><th>상태</th><th>마지막 로그인</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}><td><b>{user.displayName}</b><small>{user.username}</small></td><td>{user.role==='admin'?'관리자':'회원'}</td><td><span className={`member-status ${user.status}`}>{user.status==='active'?'활성':'차단'}</span></td><td>{user.lastLoginAt?new Date(user.lastLoginAt).toLocaleString('ko-KR'):'-'}</td><td><button disabled={user.id===viewer.id} onClick={()=>toggle(user)}>{user.status==='active'?'접근 차단':'다시 활성화'}</button></td></tr>)}</tbody></table></div></section></div></section>;
 }
 
-function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compact=false}:{market:Market;value:string;onValueChange:(value:string)=>void;onSelect:(item:SymbolSearchResult)=>void;placeholder:string;compact?:boolean}){
+function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compact=false}:{market?:Market;value:string;onValueChange:(value:string)=>void;onSelect:(item:SymbolSearchResult)=>void;placeholder:string;compact?:boolean}){
   const [results,setResults]=useState<SymbolSearchResult[]>([]);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
@@ -2239,7 +2246,9 @@ function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compac
     setLoading(true);setError('');
     const timer=window.setTimeout(async()=>{
       try{
-        const response=await fetch(`/api/symbols?q=${encodeURIComponent(query)}&market=${market}`);
+        const params=new URLSearchParams({q:query});
+        if(market)params.set('market',market);
+        const response=await fetch(`/api/symbols?${params.toString()}`);
         const payload=await response.json() as {results?:SymbolSearchResult[];error?:string};
         if(id!==requestId.current)return;
         if(!response.ok)throw new Error(payload.error||'종목을 검색하지 못했습니다.');
@@ -2253,7 +2262,7 @@ function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compac
   return <div className={`symbol-search-box${compact?' compact':''}`}>
     <div className="symbol-search-input"><Search size={compact?14:16}/><input value={value} aria-label="종목 이름·티커·코드 검색" placeholder={placeholder} autoComplete="off" onFocus={()=>{if(value.trim())setOpen(true);}} onChange={event=>{onValueChange(event.target.value);setOpen(true);}} onKeyDown={event=>{if(event.key==='Enter'&&results[0]){event.preventDefault();choose(results[0]);}if(event.key==='Escape')setOpen(false);}}/>{loading&&<Loader2 className="spin" size={14}/>}</div>
     {open&&value.trim()&&<div className="symbol-search-results" role="listbox">
-      {results.map(item=><button type="button" role="option" key={`${item.market}-${item.feed}`} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(item)}><b>{item.code}</b><span>{item.name}</span><small>{item.exchangeLabel} · {item.type}</small></button>)}
+      {results.map(item=><button type="button" role="option" key={`${item.market}-${item.feed}`} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(item)}><b>{item.code}</b><span>{item.name}</span><small>{item.market==='US'?'🇺🇸 미국':'🇰🇷 한국'} · {item.exchangeLabel} · {item.type}</small></button>)}
       {!loading&&!results.length&&!error&&<p>검색 결과가 없습니다. 이름이나 티커를 다시 확인해주세요.</p>}
       {error&&<p className="search-error">{error}</p>}
     </div>}
@@ -2282,7 +2291,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   );
   const [status, setStatus] = useState('예시 데이터 · 종목을 불러오세요');
   const [loading, setLoading] = useState(false);
-  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
+  const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     structure: true,
     choch: true,
@@ -2377,6 +2386,10 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         .map(normalizeWatchlistEntry)
         .filter((item): item is WatchedSymbol => Boolean(item)),
     [watchlist],
+  );
+  const activeWatchedSymbols = useMemo(
+    () => watchedSymbols.filter((item) => item.market === market),
+    [market, watchedSymbols],
   );
   const availableSymbols = useMemo(() => {
     const byFeed = new Map<string, SymbolItem>();
@@ -2503,6 +2516,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         setData(payload.candles);
         setHigherTimeframeData(payload.timeframes || {});
         setDataSource('kiwoom');
+        setTimeframe('1D');
         setStatus(
           `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
         );
@@ -2575,14 +2589,14 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   );
 
   const refreshLiveQuotes = useCallback(async () => {
-    if (!storageReady || !watchedSymbols.length || liveRequestInFlight.current)
+    if (!storageReady || !activeWatchedSymbols.length || liveRequestInFlight.current)
       return;
     liveRequestInFlight.current = true;
     const controller = new AbortController();
     liveAbortController.current = controller;
     setLiveLoading(true);
     try {
-      const items = watchedSymbols.map(liveQuoteKey).join(',');
+      const items = activeWatchedSymbols.map(liveQuoteKey).join(',');
       const response = await fetch(
         `/api/quotes?items=${encodeURIComponent(items)}`,
         { cache: 'no-store', signal: controller.signal },
@@ -2620,12 +2634,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         liveRequestInFlight.current = false;
       }
     }
-  }, [storageReady, watchedSymbols]);
+  }, [activeWatchedSymbols, storageReady]);
 
   useEffect(() => {
     let cancelled = false;
     let nextPoll: number | undefined;
-    console.info(`[quotes] polling started count=${watchedSymbols.length}`);
+    console.info(`[quotes] polling started market=${market} count=${activeWatchedSymbols.length}`);
     const poll = async () => {
       const startedAt = Date.now();
       if (document.visibilityState === 'visible') await refreshLiveQuotes();
@@ -2642,7 +2656,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       liveRequestInFlight.current = false;
       console.info('[quotes] polling stopped');
     };
-  }, [refreshLiveQuotes, watchedSymbols.length]);
+  }, [activeWatchedSymbols.length, market, refreshLiveQuotes]);
 
   useEffect(() => {
     if (!storageReady || initialLoadStarted.current || !watchedSymbols.length)
@@ -2661,8 +2675,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
 
   const chooseMarket = (nextMarket: Market) => {
     setMarket(nextMarket);
-    const next = symbols[nextMarket][0];
+    const next = watchedSymbols.find((item) => item.market === nextMarket) ?? symbols[nextMarket][0];
     setSymbol(next.code);
+    setTimeframe('1D');
     setStatus('종목 선택 후 데이터 불러오기를 누르세요');
   };
 
@@ -2702,8 +2717,10 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       .map((entry) => ({ ...entry, ticker: entry.ticker.trim().toUpperCase() }))
       .filter((entry) => entry.ticker);
     const normalized = cleaned.map(normalizeWatchlistEntry);
-    if (cleaned.length < 1 || cleaned.length > MAX_WATCHLIST_SIZE) {
-      setWatchlistError('관심종목은 1개에서 3개까지 지정할 수 있습니다.');
+    const usCount = cleaned.filter((entry) => entry.market === 'US').length;
+    const krCount = cleaned.filter((entry) => entry.market === 'KR').length;
+    if (cleaned.length < 1 || cleaned.length > MAX_WATCHLIST_SIZE || usCount > MAX_WATCHLIST_PER_MARKET || krCount > MAX_WATCHLIST_PER_MARKET) {
+      setWatchlistError('관심종목은 미국 최대 3개, 한국 최대 3개까지 지정할 수 있습니다.');
       return;
     }
     if (normalized.some((item) => !item)) {
@@ -2742,7 +2759,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       setData(candles);
       setHigherTimeframeData({});
       setDataSource('csv');
-      setTimeframe('5m');
+      setTimeframe('1D');
       setStatus(
         `${file.name} · ${candles.length.toLocaleString()}개 캔들 · 계산 완료`,
       );
@@ -2951,7 +2968,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </button>
         </div>
         <div className="symbol-picker searchable">
-          <SymbolSearchBox market={market} value={symbolQuery} onValueChange={setSymbolQuery} onSelect={chooseSearchedSymbol} placeholder={`${current.code} · ${current.name}`}/>
+          <SymbolSearchBox value={symbolQuery} onValueChange={setSymbolQuery} onSelect={chooseSearchedSymbol} placeholder={`${current.code} · ${current.name}`}/>
         </div>
         <button
           className="primary"
@@ -2990,7 +3007,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         <div className="live-watch-head">
           <div>
             {liveError ? <WifiOff size={15} /> : <Wifi size={15} />}
-            <span>LIVE WATCH</span>
+            <span>LIVE WATCH · {market === 'US' ? '미국' : '한국'}</span>
           </div>
           <small>
             {liveUpdatedAt
@@ -2999,7 +3016,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </small>
         </div>
         <div className="live-watch-cards">
-          {watchedSymbols.map((item) => {
+          {activeWatchedSymbols.map((item) => {
             const quoteKey = liveQuoteKey(item);
             const quote = liveQuotes[quoteKey];
             const quoteError = liveErrors[quoteKey];
@@ -3059,6 +3076,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               </button>
             );
           })}
+          {!activeWatchedSymbols.length && <div className="watchlist-market-empty">{market === 'US' ? '미국' : '한국'} 관심종목을 최대 3개까지 추가할 수 있습니다.</div>}
         </div>
         <div className="live-watch-actions">
           <button
@@ -3894,9 +3912,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           <DialogHeader>
             <DialogTitle>실시간 관심종목 설정</DialogTitle>
             <DialogDescription>
-              자동 갱신할 종목을 1개에서 3개까지 지정하세요. 미국은 영문 티커,
-              한국은 6자리 종목 코드를 입력하면 됩니다. 미국 종목은 거래소도
-              선택하세요.
+              미국과 한국 관심종목을 각각 최대 3개까지 지정하세요. 종목명이나
+              티커를 검색해 선택하면 국가와 거래소가 자동으로 설정됩니다.
             </DialogDescription>
           </DialogHeader>
           <div className="watchlist-editor">
@@ -3952,9 +3969,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 )}
                 <SymbolSearchBox
                   compact
-                  market={entry.market}
                   value={entry.ticker}
-                  placeholder={entry.market === 'US' ? '이름 또는 티커' : '이름 또는 종목코드'}
+                  placeholder="한글·영문 종목명 또는 티커"
                   onValueChange={(value) => setWatchlistDraft((draft) => draft.map((item,itemIndex) => itemIndex === index ? {...item,ticker:value.toUpperCase()} : item))}
                   onSelect={(item) => chooseWatchlistSymbol(index,item)}
                 />
@@ -3976,7 +3992,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           <button
             type="button"
             className="add-watch-symbol"
-            disabled={watchlistDraft.length >= MAX_WATCHLIST_SIZE}
+            disabled={watchlistDraft.length >= MAX_WATCHLIST_SIZE || watchlistDraft.filter((entry) => entry.market === market).length >= MAX_WATCHLIST_PER_MARKET}
             onClick={() =>
               setWatchlistDraft((draft) => [
                 ...draft,
@@ -3987,9 +4003,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             }
           >
             <Plus size={14} />
-            {watchlistDraft.length >= MAX_WATCHLIST_SIZE
-              ? '3개 등록됨 · 하나를 삭제해 교체'
-              : '종목 추가'}
+            {watchlistDraft.filter((entry) => entry.market === market).length >= MAX_WATCHLIST_PER_MARKET
+              ? `${market === 'US' ? '미국' : '한국'} 3개 등록됨`
+              : `${market === 'US' ? '미국' : '한국'} 종목 추가`}
           </button>
           {watchlistError && (
             <p className="watchlist-error">{watchlistError}</p>

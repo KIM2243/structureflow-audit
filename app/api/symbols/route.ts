@@ -12,6 +12,13 @@ type YahooQuote = {
   symbol?: string;
 };
 
+type NaverQuote = {
+  code?: string;
+  name?: string;
+  nationCode?: string;
+  typeCode?: string;
+};
+
 const US_EXCHANGES: Record<string, UsExchange> = {
   ASE: 'NA',
   BTS: 'NA',
@@ -67,6 +74,21 @@ function normalizeQuote(quote: YahooQuote) {
   };
 }
 
+function normalizeNaverQuote(quote: NaverQuote) {
+  const code = String(quote.code || '').toUpperCase();
+  if (quote.nationCode !== 'KOR' || !/^\d{6}$/.test(code)) return null;
+  const kosdaq = quote.typeCode === 'KOSDAQ';
+  return {
+    market: 'KR' as const,
+    code,
+    feed: `${code}.${kosdaq ? 'KQ' : 'KS'}`,
+    name: String(quote.name || code),
+    currency: '₩' as const,
+    type: '국내주식/ETF',
+    exchangeLabel: kosdaq ? 'KOSDAQ' : 'KOSPI',
+  };
+}
+
 export async function GET(request: Request) {
   if (!await getUser(request)) return json({ error: '로그인이 필요합니다.' }, 401);
   const url = new URL(request.url);
@@ -75,25 +97,42 @@ export async function GET(request: Request) {
   if (query.length < 1) return json({ results: [] });
   if (market && market !== 'US' && market !== 'KR') return json({ error: '시장 값이 올바르지 않습니다.' }, 400);
 
-  const upstream = new URL('https://query1.finance.yahoo.com/v1/finance/search');
+  const shouldUseKoreanSearch =
+    market === 'KR' || /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(query) || /^\d{6}$/.test(query);
+  const upstream = new URL(
+    shouldUseKoreanSearch
+      ? 'https://ac.stock.naver.com/ac'
+      : 'https://query1.finance.yahoo.com/v1/finance/search',
+  );
   upstream.searchParams.set('q', normalizedQuery(query));
-  upstream.searchParams.set('quotesCount', '20');
-  upstream.searchParams.set('newsCount', '0');
-  upstream.searchParams.set('listsCount', '0');
+  if (shouldUseKoreanSearch) {
+    upstream.searchParams.set('target', 'stock');
+  } else {
+    upstream.searchParams.set('quotesCount', '20');
+    upstream.searchParams.set('newsCount', '0');
+    upstream.searchParams.set('listsCount', '0');
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6_000);
   try {
     const response = await fetch(upstream, {
-      headers: { Accept: 'application/json', 'User-Agent': 'StructureFlow/1.0' },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'StructureFlow/1.0',
+        ...(shouldUseKoreanSearch ? { Referer: 'https://finance.naver.com/' } : {}),
+      },
       signal: controller.signal,
     });
     if (!response.ok) return json({ error: '종목 검색 서비스가 잠시 응답하지 않습니다.' }, 502);
-    const payload = await response.json() as { quotes?: YahooQuote[] };
+    const payload = await response.json() as { quotes?: YahooQuote[]; items?: NaverQuote[] };
     const seen = new Set<string>();
-    const results = (payload.quotes || [])
-      .filter((quote) => quote.quoteType === 'EQUITY' || quote.quoteType === 'ETF')
-      .map(normalizeQuote)
+    const normalized = shouldUseKoreanSearch
+      ? (payload.items || []).map(normalizeNaverQuote)
+      : (payload.quotes || [])
+          .filter((quote) => quote.quoteType === 'EQUITY' || quote.quoteType === 'ETF')
+          .map(normalizeQuote);
+    const results = normalized
       .filter((item): item is NonNullable<ReturnType<typeof normalizeQuote>> => Boolean(item))
       .filter((item) => !market || item.market === market)
       .filter((item) => {
