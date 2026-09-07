@@ -95,6 +95,12 @@ type SymbolItem = {
   exchange?: UsExchange;
 };
 
+type SymbolSearchResult = SymbolItem & {
+  market: Market;
+  type: string;
+  exchangeLabel: string;
+};
+
 type Preferences = {
   capital: number;
   riskPct: number;
@@ -2220,6 +2226,40 @@ function AdminPanel({viewer}:{viewer:AuthUser}){
   return <section className="admin-layout"><header><div><small>ACCESS CONTROL</small><h1>회원 관리</h1><p>현재 로그인: {viewer.displayName} · 관리자</p></div><span>{users.filter(u=>u.status==='active').length}명 활성</span></header><div className="admin-grid"><section className="panel member-create"><div className="panel-title"><span>새 회원 등록</span><small>관리자 승인 방식</small></div><form onSubmit={create}><label>표시 이름<input required value={draft.displayName} onChange={e=>setDraft({...draft,displayName:e.target.value})}/></label><label>아이디<input required minLength={3} value={draft.username} onChange={e=>setDraft({...draft,username:e.target.value})}/></label><label>임시 비밀번호<input required minLength={12} type="password" value={draft.password} onChange={e=>setDraft({...draft,password:e.target.value})}/><small>영문과 숫자를 포함한 12자 이상</small></label><label>권한<select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value})}><option value="member">일반 회원</option><option value="admin">관리자</option></select></label><button className="primary"><UserCog size={16}/> 회원 등록</button>{notice&&<p className="auth-success">{notice}</p>}{error&&<p className="auth-error">{error}</p>}</form></section><section className="panel member-list"><div className="panel-title"><span>등록 회원</span><small>접근 차단 가능</small></div><div className="member-table"><table><thead><tr><th>회원</th><th>권한</th><th>상태</th><th>마지막 로그인</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}><td><b>{user.displayName}</b><small>{user.username}</small></td><td>{user.role==='admin'?'관리자':'회원'}</td><td><span className={`member-status ${user.status}`}>{user.status==='active'?'활성':'차단'}</span></td><td>{user.lastLoginAt?new Date(user.lastLoginAt).toLocaleString('ko-KR'):'-'}</td><td><button disabled={user.id===viewer.id} onClick={()=>toggle(user)}>{user.status==='active'?'접근 차단':'다시 활성화'}</button></td></tr>)}</tbody></table></div></section></div></section>;
 }
 
+function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compact=false}:{market:Market;value:string;onValueChange:(value:string)=>void;onSelect:(item:SymbolSearchResult)=>void;placeholder:string;compact?:boolean}){
+  const [results,setResults]=useState<SymbolSearchResult[]>([]);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState('');
+  const [open,setOpen]=useState(false);
+  const requestId=useRef(0);
+  useEffect(()=>{
+    const query=value.trim();
+    if(!open||!query){setResults([]);setLoading(false);setError('');return;}
+    const id=++requestId.current;
+    setLoading(true);setError('');
+    const timer=window.setTimeout(async()=>{
+      try{
+        const response=await fetch(`/api/symbols?q=${encodeURIComponent(query)}&market=${market}`);
+        const payload=await response.json() as {results?:SymbolSearchResult[];error?:string};
+        if(id!==requestId.current)return;
+        if(!response.ok)throw new Error(payload.error||'종목을 검색하지 못했습니다.');
+        setResults(payload.results||[]);
+      }catch(reason){if(id===requestId.current){setResults([]);setError(reason instanceof Error?reason.message:'종목을 검색하지 못했습니다.');}}
+      finally{if(id===requestId.current)setLoading(false);}
+    },250);
+    return()=>window.clearTimeout(timer);
+  },[market,open,value]);
+  const choose=(item:SymbolSearchResult)=>{setOpen(false);setResults([]);onSelect(item);};
+  return <div className={`symbol-search-box${compact?' compact':''}`}>
+    <div className="symbol-search-input"><Search size={compact?14:16}/><input value={value} aria-label="종목 이름·티커·코드 검색" placeholder={placeholder} autoComplete="off" onFocus={()=>{if(value.trim())setOpen(true);}} onChange={event=>{onValueChange(event.target.value);setOpen(true);}} onKeyDown={event=>{if(event.key==='Enter'&&results[0]){event.preventDefault();choose(results[0]);}if(event.key==='Escape')setOpen(false);}}/>{loading&&<Loader2 className="spin" size={14}/>}</div>
+    {open&&value.trim()&&<div className="symbol-search-results" role="listbox">
+      {results.map(item=><button type="button" role="option" key={`${item.market}-${item.feed}`} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(item)}><b>{item.code}</b><span>{item.name}</span><small>{item.exchangeLabel} · {item.type}</small></button>)}
+      {!loading&&!results.length&&!error&&<p>검색 결과가 없습니다. 이름이나 티커를 다시 확인해주세요.</p>}
+      {error&&<p className="search-error">{error}</p>}
+    </div>}
+  </div>;
+}
+
 export default function Home(){
   const [state,setState]=useState<{loading:boolean;setup:boolean;user:AuthUser|null}>({loading:true,setup:false,user:null});
   useEffect(()=>{fetch('/api/auth/status').then(r=>r.json()).then((p:any)=>setState({loading:false,setup:Boolean(p.setupRequired),user:p.user||null})).catch(()=>setState({loading:false,setup:false,user:null}));},[]);
@@ -2233,6 +2273,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [symbol, setSymbol] = useState('ONDS');
   const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'admin'>('analysis');
   const [symbolQuery,setSymbolQuery]=useState('');
+  const [discoveredSymbols,setDiscoveredSymbols]=useState<SymbolSearchResult[]>([]);
   const [data, setData] = useState<Candle[]>(() => demo());
   const [higherTimeframeData, setHigherTimeframeData] =
     useState<HigherTimeframeData>({});
@@ -2340,6 +2381,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const availableSymbols = useMemo(() => {
     const byFeed = new Map<string, SymbolItem>();
     for (const item of symbols[market]) byFeed.set(item.feed, item);
+    for (const item of discoveredSymbols) {
+      if (item.market === market) byFeed.set(item.feed, item);
+    }
     for (const item of watchedSymbols) {
       if (item.market !== market) continue;
       const quote = liveQuotes[liveQuoteKey(item)];
@@ -2352,7 +2396,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       });
     }
     return Array.from(byFeed.values());
-  }, [liveQuotes, market, watchedSymbols]);
+  }, [discoveredSymbols, liveQuotes, market, watchedSymbols]);
   const current =
     availableSymbols.find((item) => item.code === symbol) ??
     availableSymbols[0];
@@ -2622,9 +2666,23 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     setStatus('종목 선택 후 데이터 불러오기를 누르세요');
   };
 
-  const chooseSymbol = (code: string) => {
-    setSymbol(code);
-    setStatus('데이터 불러오기를 누르세요');
+  const chooseSearchedSymbol = (item: SymbolSearchResult) => {
+    setDiscoveredSymbols((currentItems) => [
+      item,
+      ...currentItems.filter((candidate) => candidate.market !== item.market || candidate.feed !== item.feed),
+    ].slice(0, 30));
+    setMarket(item.market);
+    setSymbol(item.code);
+    setSymbolQuery('');
+    void loadMarketData(item);
+  };
+
+  const chooseWatchlistSymbol = (index: number, item: SymbolSearchResult) => {
+    setWatchlistDraft((draft) => draft.map((entry, itemIndex) => itemIndex === index ? {
+      market: item.market,
+      ticker: item.feed,
+      ...(item.market === 'US' ? { exchange: item.exchange || 'ND' } : {}),
+    } : entry));
   };
 
   const activateWatchedSymbol = (item: WatchedSymbol) => {
@@ -2892,11 +2950,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             🇰🇷 한국
           </button>
         </div>
-        <label className="symbol-picker searchable">
-          <Search size={16} />
-          <input value={symbolQuery} list="symbol-results" aria-label="종목 이름·티커·코드 검색" placeholder={`${current.code} · ${current.name}`} onChange={(event)=>{const value=event.target.value;setSymbolQuery(value);const code=value.split(' · ')[0].trim().toUpperCase();if(availableSymbols.some(item=>item.code===code)){chooseSymbol(code);setSymbolQuery('');}}} onKeyDown={(event)=>{if(event.key==='Enter'){event.preventDefault();const q=symbolQuery.trim().toLowerCase();const found=availableSymbols.find(item=>item.code.toLowerCase()===q||item.name.toLowerCase().includes(q));if(found){chooseSymbol(found.code);setSymbolQuery('');}}}} />
-          <datalist id="symbol-results">{availableSymbols.filter(item=>{const q=symbolQuery.trim().toLowerCase();return !q||item.code.toLowerCase().includes(q)||item.name.toLowerCase().includes(q);}).map(item=><option key={`${market}-${item.code}`} value={`${item.code} · ${item.name}`}/>)}</datalist>
-        </label>
+        <div className="symbol-picker searchable">
+          <SymbolSearchBox market={market} value={symbolQuery} onValueChange={setSymbolQuery} onSelect={chooseSearchedSymbol} placeholder={`${current.code} · ${current.name}`}/>
+        </div>
         <button
           className="primary"
           onClick={() => loadMarketData(current)}
@@ -3894,25 +3950,13 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                     <option>KRX</option>
                   </select>
                 )}
-                <input
+                <SymbolSearchBox
+                  compact
+                  market={entry.market}
                   value={entry.ticker}
-                  placeholder={
-                    entry.market === 'US' ? '예: AAPL' : '예: 005930'
-                  }
-                  aria-label={`관심종목 ${index + 1} 코드`}
-                  maxLength={entry.market === 'US' ? 10 : 9}
-                  onChange={(event) =>
-                    setWatchlistDraft((draft) =>
-                      draft.map((item, itemIndex) =>
-                        itemIndex === index
-                          ? {
-                              ...item,
-                              ticker: event.target.value.toUpperCase(),
-                            }
-                          : item,
-                      ),
-                    )
-                  }
+                  placeholder={entry.market === 'US' ? '이름 또는 티커' : '이름 또는 종목코드'}
+                  onValueChange={(value) => setWatchlistDraft((draft) => draft.map((item,itemIndex) => itemIndex === index ? {...item,ticker:value.toUpperCase()} : item))}
+                  onSelect={(item) => chooseWatchlistSymbol(index,item)}
                 />
                 <button
                   type="button"
