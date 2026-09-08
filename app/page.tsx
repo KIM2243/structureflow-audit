@@ -1056,8 +1056,12 @@ function PriceChart({
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
   const latestVisibleCandle = displayed.at(-1)!;
+  const livePriceRatio = Number.isFinite(livePrice) && latestVisibleCandle.close > 0
+    ? livePrice! / latestVisibleCandle.close
+    : 0;
+  const livePriceMatchesSeries = livePriceRatio >= 0.5 && livePriceRatio <= 2;
   const currentPrice =
-    isViewingLatest && Number.isFinite(livePrice)
+    isViewingLatest && livePriceMatchesSeries
       ? livePrice!
       : latestVisibleCandle.close;
   const visiblePriceSpan = Math.max(
@@ -2519,6 +2523,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [dataSource, setDataSource] = useState<'demo' | 'kiwoom' | 'csv'>(
     'demo',
   );
+  const [loadedInstrumentKey, setLoadedInstrumentKey] = useState('US:ONDS');
   const [status, setStatus] = useState('예시 데이터 · 종목을 불러오세요');
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
@@ -2671,6 +2676,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     availableSymbols.find((item) => item.code === symbol) ??
     availableSymbols[0];
   const hasMarketSelection = Boolean(symbol);
+  const currentInstrumentKey = `${market}:${current.code}`;
+  const chartMatchesSelection =
+    hasMarketSelection && loadedInstrumentKey === currentInstrumentKey;
   const timeframeData = useMemo(
     () => buildTimeframeData(data, higherTimeframeData, dataSource),
     [data, dataSource, higherTimeframeData],
@@ -2747,11 +2755,13 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       const cacheKey = `${itemMarket}:${item.code}:${exchange}`;
       const requestId = ++marketRequestId.current;
       marketAbortController.current?.abort();
+      setLoadedInstrumentKey('');
 
       const applyPayload = (payload: MarketDataCacheEntry['payload']) => {
         setData(payload.candles);
         setHigherTimeframeData(payload.timeframes || {});
         setDataSource('kiwoom');
+        setLoadedInstrumentKey(cacheKey);
         setTimeframe('1D');
         setStatus(
           `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
@@ -2913,6 +2923,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     setMarket(nextMarket);
     const next = watchedSymbols.find((item) => item.market === nextMarket);
     setSymbol(next?.code ?? '');
+    setLoadedInstrumentKey('');
     setTimeframe('1D');
     setStatus(
       next
@@ -3000,6 +3011,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         .filter((item) => item.market === market);
       if (!savedForCurrentMarket.some((item) => item.code === symbol)) {
         setSymbol(savedForCurrentMarket[0]?.code ?? '');
+        setLoadedInstrumentKey('');
       }
       setLiveQuotes({});
       setLiveErrors({});
@@ -3020,6 +3032,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       setData(candles);
       setHigherTimeframeData({});
       setDataSource('csv');
+      setLoadedInstrumentKey(currentInstrumentKey);
       setTimeframe(
         resampleBySession(candles, timeframeSizes['1D']).length >= 20
           ? '1D'
@@ -3373,14 +3386,30 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       </>}
 
       {tab === 'analysis' ? (
-        !hasMarketSelection ? (
+        !hasMarketSelection || !chartMatchesSelection ? (
         <section className="analysis-empty-state">
-          <Database size={34} />
-          <strong>{market === 'US' ? '미국' : '한국'} 분석 종목이 없습니다</strong>
-          <p>위 관심종목 영역을 눌러 종목을 추가하거나, 이름 또는 종목코드로 검색하세요.</p>
-          <button type="button" className="primary" onClick={openWatchlistSettings}>
-            <Plus size={15} /> 종목 설정 열기
-          </button>
+          {loading ? <Loader2 className="spin" size={34} /> : <Database size={34} />}
+          <strong>
+            {!hasMarketSelection
+              ? `${market === 'US' ? '미국' : '한국'} 분석 종목이 없습니다`
+              : loading
+                ? `${current.name} 차트를 불러오는 중입니다`
+                : `${current.name} 차트가 아직 준비되지 않았습니다`}
+          </strong>
+          <p>
+            {!hasMarketSelection
+              ? '위 관심종목 영역을 눌러 종목을 추가하거나, 이름 또는 종목코드로 검색하세요.'
+              : status}
+          </p>
+          {!hasMarketSelection ? (
+            <button type="button" className="primary" onClick={openWatchlistSettings}>
+              <Plus size={15} /> 종목 설정 열기
+            </button>
+          ) : !loading ? (
+            <button type="button" className="primary" onClick={() => void loadMarketData(current)}>
+              <Database size={15} /> 다시 불러오기
+            </button>
+          ) : null}
         </section>
       ) : (
         <>
