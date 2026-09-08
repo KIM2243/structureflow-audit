@@ -1052,7 +1052,8 @@ function PriceChart({
   const visibleLiquidity = analysis.liquidity.filter(
     (level) => level.index >= offset && level.index < endIndex,
   );
-  const showForecast = layers.forecast && isViewingLatest;
+  const showForecast =
+    layers.forecast && isViewingLatest && timeframe === '15m';
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
   const latestVisibleCandle = displayed.at(-1)!;
@@ -1257,7 +1258,9 @@ function PriceChart({
           >
             {showForecast
               ? `진입 예측 · ${analysis.entryForecast.status}`
-              : '진입 예측 · 최신 구간에서 표시'}
+              : timeframe === '15m'
+                ? '진입 예측 · 최신 구간에서 표시'
+                : '진입 예측 · 15m 차트에서 표시'}
           </span>
         )}
       </div>
