@@ -1790,6 +1790,24 @@ button:disabled {
 }
 
 .paper-layout { max-width: 1500px; margin: 0 auto; padding: 14px; }
+.paper-workspace-bar { display: grid; grid-template-columns: auto minmax(260px,460px) auto auto minmax(180px,1fr); align-items: center; gap: 10px; margin-bottom: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #0c121a; }
+.paper-workspace-bar .segmented { height: 40px; }
+.paper-symbol-search { min-width: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; border: 1px solid #2a3748; border-radius: 8px; background: #090e15; }
+.paper-load-button { min-height: 40px; white-space: nowrap; }
+.paper-live-price { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+.paper-live-price strong { font: 800 19px monospace; }
+.paper-live-price small { font: 800 11px monospace; }
+.paper-workspace-bar > p { overflow: hidden; margin: 0; color: #8190a3; font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.paper-chart-panel { margin-bottom: 10px; overflow: visible; }
+.paper-chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.paper-chart-heading > div:first-child { display: grid; gap: 4px; }
+.paper-chart-heading small { color: var(--green); font: 800 9px monospace; letter-spacing: 1px; }
+.paper-chart-heading strong { font-size: 14px; }
+.paper-timeframes,.paper-layer-toggles { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.paper-timeframes button,.paper-layer-toggles button { border: 1px solid #334154; border-radius: 6px; background: #111923; color: #93a0b1; padding: 6px 9px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.paper-timeframes button.on,.paper-layer-toggles button.on { border-color: #2d8e71; background: #123128; color: var(--green); }
+.paper-timeframes button:disabled { opacity: .35; cursor: not-allowed; }
+.paper-layer-toggles { padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .paper-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
 .paper-balance-card { min-height: 112px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(145deg,#101720,#0b1017); padding: 16px; display: flex; flex-direction: column; justify-content: center; }
 .paper-balance-card > div { display: flex; align-items: center; gap: 7px; color: var(--green); }
@@ -1834,8 +1852,9 @@ button:disabled {
 .fill-buy { color: var(--green); background: #123328; }
 .fill-sell { color: var(--red); background: #351921; }
 
+@media (max-width: 1100px) { .paper-workspace-bar { grid-template-columns: auto minmax(240px,1fr) auto auto; } .paper-workspace-bar > p { grid-column: 1 / -1; text-align: left; } }
 @media (max-width: 1000px) { .paper-summary-grid { grid-template-columns: repeat(2,1fr); } .paper-main-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .paper-layout { padding: 8px; } .paper-summary-grid { grid-template-columns: 1fr 1fr; gap: 7px; } .paper-balance-card { min-height: 96px; padding: 12px; } .paper-balance-card strong { font-size: 16px; } .paper-order-panel,.paper-portfolio-panel { min-height: auto; } .paper-empty { min-height: 180px; } }
+@media (max-width: 760px) { .paper-layout { padding: 8px; } .paper-workspace-bar { grid-template-columns: 1fr 1fr; } .paper-workspace-bar .segmented,.paper-symbol-search,.paper-workspace-bar > p { grid-column: 1 / -1; } .paper-load-button { width: 100%; justify-content: center; } .paper-live-price { justify-content: flex-end; } .paper-chart-heading { align-items: flex-start; flex-direction: column; } .paper-summary-grid { grid-template-columns: 1fr 1fr; gap: 7px; } .paper-balance-card { min-height: 96px; padding: 12px; } .paper-balance-card strong { font-size: 16px; } .paper-order-panel,.paper-portfolio-panel { min-height: auto; } .paper-empty { min-height: 180px; } }
 
 
 /* Remote stock and ETF search */

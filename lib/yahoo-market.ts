@@ -5,6 +5,10 @@ type YahooChart = {
   chart?: { result?: Array<{ meta?: Record<string, unknown>; timestamp?: number[]; indicators?: { quote?: Array<{ open?: Array<number|null>; high?: Array<number|null>; low?: Array<number|null>; close?: Array<number|null>; volume?: Array<number|null> }> } }> };
 };
 
+function metaText(value: unknown, fallback = '') {
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
 function candles(payload: YahooChart) {
   const result=payload.chart?.result?.[0]; const quote=result?.indicators?.quote?.[0];
   if(!result?.timestamp||!quote)return [];
@@ -66,8 +70,8 @@ export async function getYahooCurrentPrice(
     key: quoteRequestKey(request),
     market: request.market,
     symbol: request.symbol,
-    name: String(meta.longName || meta.shortName || request.symbol),
-    exchange: String(meta.exchangeName || ''),
+    name: metaText(meta.longName, metaText(meta.shortName, request.symbol)),
+    exchange: metaText(meta.exchangeName),
     currency: request.market === 'KR' ? 'KRW' : 'USD',
     price,
     previousClose,
@@ -88,5 +92,5 @@ export async function getYahooMarketChart(market:'US'|'KR',symbol:string){
     : await loadSeries(symbol);
   const fiveCandles=candles(five),fifteenCandles=candles(fifteen),hourCandles=candles(hour),dailyCandles=candles(daily);if(fiveCandles.length<40)throw new Error('보조 시세의 분석 데이터가 부족합니다.');
   const meta=five.chart!.result![0].meta||{};
-  return {symbol,name:String(meta.longName||meta.shortName||symbol),exchange:String(meta.exchangeName||''),currency:market==='KR'?'KRW':'USD',price:Number(meta.regularMarketPrice)||fiveCandles.at(-1)!.close,source:'Yahoo Finance 보조 시세',candles:fiveCandles,timeframes:{'15m':fifteenCandles,'1H':hourCandles,'4H':fourHour(hourCandles),'1D':dailyCandles},fetchedAt:new Date().toISOString()};
+  return {symbol,name:metaText(meta.longName,metaText(meta.shortName,symbol)),exchange:metaText(meta.exchangeName),currency:market==='KR'?'KRW':'USD',price:Number(meta.regularMarketPrice)||fiveCandles.at(-1)!.close,source:'Yahoo Finance 보조 시세',candles:fiveCandles,timeframes:{'15m':fifteenCandles,'1H':hourCandles,'4H':fourHour(hourCandles),'1D':dailyCandles},fetchedAt:new Date().toISOString()};
 }

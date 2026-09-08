@@ -1,6 +1,14 @@
 import { env } from 'cloudflare:workers';
 
 export type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
+type LoginRow = AuthUser & {
+  passwordHash: string;
+  passwordSalt: string;
+  passwordIterations: number;
+  status: 'active' | 'disabled';
+  failedAttempts: number;
+  lockedUntil: number | null;
+};
 const COOKIE = 'sf_session';
 // Cloudflare Workers currently caps Web Crypto PBKDF2 at 100,000 iterations.
 const ITERATIONS = 100_000;
@@ -35,7 +43,7 @@ export async function createUser(input: { username: string; displayName: string;
   return id;
 }
 export async function login(username: string, password: string) {
-  const row=await env.DB.prepare('SELECT id,username,display_name AS displayName,password_hash AS passwordHash,password_salt AS passwordSalt,password_iterations AS passwordIterations,role,status,failed_attempts AS failedAttempts,locked_until AS lockedUntil FROM users WHERE username=? COLLATE NOCASE').bind(username).first<any>();
+  const row=await env.DB.prepare('SELECT id,username,display_name AS displayName,password_hash AS passwordHash,password_salt AS passwordSalt,password_iterations AS passwordIterations,role,status,failed_attempts AS failedAttempts,locked_until AS lockedUntil FROM users WHERE username=? COLLATE NOCASE').bind(username).first<LoginRow>();
   const now=Date.now();
   if (!row || row.status!=='active' || (row.lockedUntil && row.lockedUntil>now)) return null;
   const ok=(await passwordHash(password,row.passwordSalt,row.passwordIterations))===row.passwordHash;

@@ -11,7 +11,6 @@ import {
 import {
   Activity,
   BarChart3,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -73,6 +72,11 @@ import { getRecentSwingRange } from '@/lib/swing-range';
 
 type Market = 'US' | 'KR';
 type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
+type AdminUser = AuthUser & {
+  status: 'active' | 'disabled';
+  createdAt: number;
+  lastLoginAt: number | null;
+};
 type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
@@ -312,6 +316,35 @@ function resampleBySession(data: Candle[], size: number) {
   }
   flushSession();
   return output;
+}
+
+function buildTimeframeData(
+  data: Candle[],
+  higherTimeframeData: HigherTimeframeData,
+  dataSource: 'demo' | 'kiwoom' | 'csv',
+): Record<Timeframe, Candle[]> {
+  const useNativeTimeframes = dataSource === 'kiwoom';
+  const fifteenMinute = useNativeTimeframes
+    ? higherTimeframeData['15m'] || []
+    : higherTimeframeData['15m']?.length
+      ? higherTimeframeData['15m']
+      : resampleBySession(data, timeframeSizes['15m']);
+  const hourly = useNativeTimeframes
+    ? higherTimeframeData['1H'] || []
+    : higherTimeframeData['1H']?.length
+      ? higherTimeframeData['1H']
+      : resampleBySession(data, timeframeSizes['1H']);
+  const fourHour = useNativeTimeframes
+    ? higherTimeframeData['4H'] || []
+    : higherTimeframeData['4H']?.length
+      ? higherTimeframeData['4H']
+      : resampleBySession(hourly, 4);
+  const daily = useNativeTimeframes
+    ? higherTimeframeData['1D'] || []
+    : higherTimeframeData['1D']?.length
+      ? higherTimeframeData['1D']
+      : resampleBySession(data, timeframeSizes['1D']);
+  return { '5m': data, '15m': fifteenMinute, '1H': hourly, '4H': fourHour, '1D': daily };
 }
 
 const timeframeLabels: Record<Timeframe, string> = {
@@ -2045,40 +2078,154 @@ function BacktestTradeChart({
 }
 
 function PaperTrading({
-  market,
-  current,
-  price,
-  liveQuotes,
   preferences,
+  viewerId,
 }: {
-  market: Market;
-  current: SymbolItem;
-  price: number;
-  liveQuotes: Record<string, LiveQuote>;
   preferences: Preferences;
+  viewerId: string;
 }) {
+  const [market, setMarket] = useState<Market>('US');
+  const [current, setCurrent] = useState<SymbolItem>(symbols.US[0]);
+  const [symbolQuery, setSymbolQuery] = useState('');
+  const [data, setData] = useState<Candle[]>(() => demo());
+  const [higherTimeframeData, setHigherTimeframeData] = useState<HigherTimeframeData>({});
+  const [dataSource, setDataSource] = useState<'demo' | 'kiwoom'>('demo');
+  const [status, setStatus] = useState('모의투자 전용 종목을 검색해 불러오세요.');
+  const [loading, setLoading] = useState(false);
+  const [timeframe, setTimeframe] = useState<Timeframe>('1D');
+  const [quote, setQuote] = useState<LiveQuote | null>(null);
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    structure: true,
+    choch: true,
+    swingLabels: true,
+    premiumDiscount: true,
+    internalStructure: true,
+    volume: true,
+    volumeProfile: true,
+    orderflow: false,
+    liquidity: false,
+    forecast: true,
+  });
+  const requestId = useRef(0);
+  const timeframeData = useMemo(
+    () => buildTimeframeData(data, higherTimeframeData, dataSource),
+    [data, dataSource, higherTimeframeData],
+  );
+  const chartData = timeframeData[timeframe];
+  const chartAnalysis = useMemo(() => analyze(chartData), [chartData]);
+  const price = quote?.price ?? chartData.at(-1)?.close ?? data.at(-1)?.close ?? 0;
+  const liveQuotes = quote ? { [quote.key]: quote } : {};
+
+  const refreshQuote = useCallback(async (item: SymbolItem, itemMarket: Market) => {
+    const key = itemMarket === 'KR'
+      ? `KR:${item.code}`
+      : `US:${item.exchange || 'ND'}:${item.code}`;
+    try {
+      const response = await fetch(`/api/quotes?items=${encodeURIComponent(key)}`, { cache: 'no-store' });
+      const payload = await response.json() as QuotesResponse;
+      const nextQuote = payload.quotes?.[0];
+      if (response.ok && nextQuote) setQuote(nextQuote);
+    } catch {
+      // 차트 종가를 유지하므로 시세 한 번의 실패가 모의주문을 막지 않습니다.
+    }
+  }, []);
+
+  const loadPaperMarketData = async (item: SymbolItem, itemMarket: Market) => {
+    const activeRequest = ++requestId.current;
+    setLoading(true);
+    setStatus(`${item.code} 모의투자 차트 불러오는 중…`);
+    try {
+      const query = new URLSearchParams({
+        market: itemMarket,
+        symbol: item.code,
+        ...(itemMarket === 'US' ? { exchange: item.exchange || 'ND' } : {}),
+      });
+      const response = await fetch(`/api/market?${query.toString()}`, { cache: 'no-store' });
+      const payload = await response.json() as MarketResponse;
+      if (!response.ok) throw new Error(payload.error || `데이터 제공처 오류 ${response.status}`);
+      if (!payload.candles || payload.candles.length < 40) throw new Error('분석 가능한 데이터가 부족합니다.');
+      const required: Timeframe[] = ['15m', '1H', '4H', '1D'];
+      if (required.some((name) => (payload.timeframes?.[name]?.length || 0) < 20)) {
+        throw new Error('모든 시간대 차트 데이터가 준비되지 않았습니다.');
+      }
+      if (activeRequest !== requestId.current) return;
+      setCurrent({ ...item, name: payload.name || item.name });
+      setMarket(itemMarket);
+      setData(payload.candles);
+      setHigherTimeframeData(payload.timeframes || {});
+      setDataSource('kiwoom');
+      setTimeframe('1D');
+      setStatus(`${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들`);
+      void refreshQuote(item, itemMarket);
+    } catch (error) {
+      if (activeRequest === requestId.current) {
+        setStatus(`불러오기 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
+      }
+    } finally {
+      if (activeRequest === requestId.current) setLoading(false);
+    }
+  };
+
+  const selectMarket = (nextMarket: Market) => {
+    requestId.current += 1;
+    setMarket(nextMarket);
+    setCurrent(symbols[nextMarket][0]);
+    setSymbolQuery('');
+    setQuote(null);
+    setData(demo());
+    setHigherTimeframeData({});
+    setDataSource('demo');
+    setTimeframe('1D');
+    setStatus(`${nextMarket === 'US' ? '미국' : '한국'} 종목을 검색해 불러오세요.`);
+  };
+
+  const selectSymbol = (item: SymbolSearchResult) => {
+    setCurrent(item);
+    setMarket(item.market);
+    setSymbolQuery('');
+    void loadPaperMarketData(item, item.market);
+  };
+
+  useEffect(() => {
+    if (dataSource !== 'kiwoom') return;
+    const timer = window.setInterval(() => void refreshQuote(current, market), 5_000);
+    return () => window.clearInterval(timer);
+  }, [current, dataSource, market, refreshQuote]);
+
+  useEffect(() => {
+    document.title = `${current.name} 모의투자 / ${current.currency}${formatPrice(price, market)}`;
+  }, [current.currency, current.name, market, price]);
+
   const [account, setAccount] = useState<PaperAccount>(DEFAULT_PAPER_ACCOUNT);
   const [quantity, setQuantity] = useState(1);
   const [message, setMessage] = useState('주문할 수량을 입력하세요.');
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem('structureflow:paper-account');
-      if (saved) setAccount(JSON.parse(saved) as PaperAccount);
-    } catch {
-      setMessage('저장된 모의계좌를 불러오지 못해 새 계좌로 시작합니다.');
-    }
-    setReady(true);
-  }, []);
+    const timer = window.setTimeout(() => {
+      try {
+        const accountKey = `structureflow:paper-account:${viewerId}`;
+        const saved = window.localStorage.getItem(accountKey) || window.localStorage.getItem('structureflow:paper-account');
+        if (saved) setAccount(JSON.parse(saved) as PaperAccount);
+        if (!window.localStorage.getItem(accountKey) && saved) {
+          window.localStorage.setItem(accountKey, saved);
+          window.localStorage.removeItem('structureflow:paper-account');
+        }
+      } catch {
+        setMessage('저장된 모의계좌를 불러오지 못해 새 계좌로 시작합니다.');
+      }
+      setReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [viewerId]);
 
   useEffect(() => {
     if (!ready) return;
     window.localStorage.setItem(
-      'structureflow:paper-account',
+      `structureflow:paper-account:${viewerId}`,
       JSON.stringify(account),
     );
-  }, [account, ready]);
+  }, [account, ready, viewerId]);
 
   const currentKey = market === 'KR' ? `KR:${current.code}` : `US:${current.exchange || 'ND'}:${current.code}`;
   const position = account.positions.find((item) => item.key === currentKey);
@@ -2171,6 +2318,83 @@ function PaperTrading({
 
   return (
     <section className="paper-layout">
+      <section className="paper-workspace-bar" aria-label="모의투자 종목 선택">
+        <div className="segmented" aria-label="모의투자 시장 선택">
+          <button className={market === 'US' ? 'on' : ''} onClick={() => selectMarket('US')}>🇺🇸 미국</button>
+          <button className={market === 'KR' ? 'on' : ''} onClick={() => selectMarket('KR')}>🇰🇷 한국</button>
+        </div>
+        <div className="paper-symbol-search">
+          <SymbolSearchBox
+            market={market}
+            value={symbolQuery}
+            onValueChange={setSymbolQuery}
+            onSelect={selectSymbol}
+            placeholder={`${current.code} · ${current.name}`}
+          />
+        </div>
+        <button
+          type="button"
+          className="primary paper-load-button"
+          disabled={loading}
+          onClick={() => void loadPaperMarketData(current, market)}
+        >
+          {loading ? <Loader2 className="spin" size={16}/> : <Database size={16}/>}
+          차트 불러오기
+        </button>
+        <div className="paper-live-price">
+          <strong>{current.currency}{formatPrice(price, market)}</strong>
+          {quote && <small className={quote.change >= 0 ? 'positive' : 'negative'}>{quote.change >= 0 ? '+' : ''}{quote.changePct.toFixed(2)}%</small>}
+        </div>
+        <p title={status}>{status}</p>
+      </section>
+
+      <section className="panel paper-chart-panel">
+        <div className="paper-chart-heading">
+          <div>
+            <small>PAPER TRADING CHART</small>
+            <strong>{current.code} · {current.name}</strong>
+          </div>
+          <div className="paper-timeframes" aria-label="모의투자 차트 시간대">
+            {(['1D', '4H', '1H', '15m', '5m'] as Timeframe[]).map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={timeframe === item ? 'on' : ''}
+                onClick={() => setTimeframe(item)}
+                disabled={!timeframeData[item].length}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="paper-layer-toggles" aria-label="모의투자 차트 레이어">
+          {([
+            ['structure', '스윙구조'], ['choch', 'CHOCH'], ['swingLabels', 'HH·HL·LH·LL'],
+            ['premiumDiscount', 'Premium/Discount'], ['internalStructure', '내부구조'],
+            ['volume', '거래량'], ['volumeProfile', 'VP'], ['forecast', '진입예측'],
+          ] as Array<[LayerKey, string]>).map(([key, label]) => (
+            <button
+              type="button"
+              key={key}
+              className={layers[key] ? 'on' : ''}
+              aria-pressed={layers[key]}
+              onClick={() => setLayers((currentLayers) => ({ ...currentLayers, [key]: !currentLayers[key] }))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <PriceChart
+          data={chartData}
+          analysis={chartAnalysis}
+          market={market}
+          timeframe={timeframe}
+          layers={layers}
+          seriesKey={`paper-${market}-${current.code}-${timeframe}`}
+        />
+      </section>
+
       <div className="paper-summary-grid">
         <article className="paper-balance-card primary-card">
           <div><Landmark size={17} /><span>{market === 'US' ? '미국' : '한국'} 모의계좌</span></div>
@@ -2219,18 +2443,18 @@ function PaperTrading({
 
 function AuthScreen({setup,onAuthenticated}:{setup:boolean;onAuthenticated:(user:AuthUser)=>void}){
   const [username,setUsername]=useState(''); const [displayName,setDisplayName]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
-  async function submit(event:React.FormEvent){event.preventDefault();setBusy(true);setError('');const response=await fetch(setup?'/api/auth/setup':'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,displayName,password})});const payload=await response.json() as {user?:AuthUser;error?:string};setBusy(false);if(!response.ok||!payload.user){setError(payload.error||'로그인하지 못했습니다.');return;}onAuthenticated(payload.user);}
+  async function submit(event:React.SyntheticEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');const response=await fetch(setup?'/api/auth/setup':'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,displayName,password})});const payload=await response.json() as {user?:AuthUser;error?:string};setBusy(false);if(!response.ok||!payload.user){setError(payload.error||'로그인하지 못했습니다.');return;}onAuthenticated(payload.user);}
   return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><Activity size={24}/><div><strong>STRUCTURE<span>FLOW</span></strong><small>PRIVATE TRADING WORKSPACE</small></div></div><div className="auth-copy"><small>{setup?'OWNER SETUP':'MEMBER SIGN IN'}</small><h1>{setup?'관리자 계정을 설정하세요':'내 계정으로 로그인'}</h1><p>{setup?'기존 소유자 인증이 확인됐습니다. 이 계정 생성 후에는 ChatGPT 계정 없이 로그인합니다.':'관리자가 등록한 회원만 이용할 수 있습니다.'}</p></div><form onSubmit={submit}>{setup&&<label>표시 이름<input required value={displayName} onChange={e=>setDisplayName(e.target.value)} autoComplete="name"/></label>}<label>아이디<input required minLength={3} value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" placeholder="영문·숫자 3자 이상"/></label><label>비밀번호<input required minLength={12} type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete={setup?'new-password':'current-password'} placeholder="영문·숫자 포함 12자 이상"/></label>{error&&<p className="auth-error">{error}</p>}<button className="primary auth-submit" disabled={busy}>{busy?<Loader2 className="spin" size={16}/>:<ShieldCheck size={16}/>} {setup?'관리자 계정 만들기':'로그인'}</button></form><p className="auth-note">비밀번호는 암호화되어 저장되며 로그인 실패가 반복되면 계정이 잠시 보호됩니다.</p></section></main>;
 }
 
 function AdminPanel({viewer}:{viewer:AuthUser}){
-  const [users,setUsers]=useState<any[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [users,setUsers]=useState<AdminUser[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [draft,setDraft]=useState({username:'',displayName:'',password:'',role:'member'});
-  const load=useCallback(async()=>{const r=await fetch('/api/admin/users');const p=await r.json() as any;if(r.ok)setUsers(p.users||[]);else setError(p.error||'회원 목록을 불러오지 못했습니다.');},[]);
-  useEffect(()=>{void load();},[load]);
-  async function create(event:React.FormEvent){event.preventDefault();setError('');setNotice('');const r=await fetch('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});const p=await r.json() as any;if(!r.ok){setError(p.error);return;}setDraft({username:'',displayName:'',password:'',role:'member'});setNotice('새 회원을 등록했습니다.');await load();}
-  async function toggle(user:any){setError('');const r=await fetch('/api/admin/users',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:user.id,action:'status',status:user.status==='active'?'disabled':'active'})});const p=await r.json() as any;if(!r.ok){setError(p.error);return;}await load();}
-  return <section className="admin-layout"><header><div><small>ACCESS CONTROL</small><h1>회원 관리</h1><p>현재 로그인: {viewer.displayName} · 관리자</p></div><span>{users.filter(u=>u.status==='active').length}명 활성</span></header><div className="admin-grid"><section className="panel member-create"><div className="panel-title"><span>새 회원 등록</span><small>관리자 승인 방식</small></div><form onSubmit={create}><label>표시 이름<input required value={draft.displayName} onChange={e=>setDraft({...draft,displayName:e.target.value})}/></label><label>아이디<input required minLength={3} value={draft.username} onChange={e=>setDraft({...draft,username:e.target.value})}/></label><label>임시 비밀번호<input required minLength={12} type="password" value={draft.password} onChange={e=>setDraft({...draft,password:e.target.value})}/><small>영문과 숫자를 포함한 12자 이상</small></label><label>권한<select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value})}><option value="member">일반 회원</option><option value="admin">관리자</option></select></label><button className="primary"><UserCog size={16}/> 회원 등록</button>{notice&&<p className="auth-success">{notice}</p>}{error&&<p className="auth-error">{error}</p>}</form></section><section className="panel member-list"><div className="panel-title"><span>등록 회원</span><small>접근 차단 가능</small></div><div className="member-table"><table><thead><tr><th>회원</th><th>권한</th><th>상태</th><th>마지막 로그인</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}><td><b>{user.displayName}</b><small>{user.username}</small></td><td>{user.role==='admin'?'관리자':'회원'}</td><td><span className={`member-status ${user.status}`}>{user.status==='active'?'활성':'차단'}</span></td><td>{user.lastLoginAt?new Date(user.lastLoginAt).toLocaleString('ko-KR'):'-'}</td><td><button disabled={user.id===viewer.id} onClick={()=>toggle(user)}>{user.status==='active'?'접근 차단':'다시 활성화'}</button></td></tr>)}</tbody></table></div></section></div></section>;
+  const load=useCallback(async()=>{const r=await fetch('/api/admin/users');const p=await r.json() as {users?:AdminUser[];error?:string};if(r.ok)setUsers(p.users||[]);else setError(p.error||'회원 목록을 불러오지 못했습니다.');},[]);
+  useEffect(()=>{const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer);},[load]);
+  async function create(event:React.SyntheticEvent<HTMLFormElement>){event.preventDefault();setError('');setNotice('');const r=await fetch('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(draft)});const p=await r.json() as {error?:string};if(!r.ok){setError(p.error||'회원을 등록하지 못했습니다.');return;}setDraft({username:'',displayName:'',password:'',role:'member'});setNotice('새 회원을 등록했습니다.');await load();}
+  async function toggle(user:AdminUser){setError('');const r=await fetch('/api/admin/users',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:user.id,action:'status',status:user.status==='active'?'disabled':'active'})});const p=await r.json() as {error?:string};if(!r.ok){setError(p.error||'회원 상태를 변경하지 못했습니다.');return;}await load();}
+  return <section className="admin-layout"><header><div><small>ACCESS CONTROL</small><h1>회원 관리</h1><p>현재 로그인: {viewer.displayName} · 관리자</p></div><span>{users.filter(u=>u.status==='active').length}명 활성</span></header><div className="admin-grid"><section className="panel member-create"><div className="panel-title"><span>새 회원 등록</span><small>관리자 승인 방식</small></div><form onSubmit={create}><label>표시 이름<input required value={draft.displayName} onChange={e=>setDraft({...draft,displayName:e.target.value})}/></label><label>아이디<input required minLength={3} value={draft.username} onChange={e=>setDraft({...draft,username:e.target.value})}/></label><label>임시 비밀번호<input required minLength={12} type="password" value={draft.password} onChange={e=>setDraft({...draft,password:e.target.value})}/><small>영문과 숫자를 포함한 12자 이상</small></label><label>권한<select aria-label="신규 회원 권한" value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value})}><option value="member">일반 회원</option><option value="admin">관리자</option></select></label><button className="primary" aria-label="신규 회원 등록"><UserCog size={16}/> 회원 등록</button>{notice&&<p className="auth-success">{notice}</p>}{error&&<p className="auth-error">{error}</p>}</form></section><section className="panel member-list"><div className="panel-title"><span>등록 회원</span><small>접근 차단 가능</small></div><div className="member-table"><table><thead><tr><th>회원</th><th>권한</th><th>상태</th><th>마지막 로그인</th><th>회원 작업</th></tr></thead><tbody>{users.map(user=><tr key={user.id}><td><b>{user.displayName}</b><small>{user.username}</small></td><td>{user.role==='admin'?'관리자':'회원'}</td><td><span className={`member-status ${user.status}`}>{user.status==='active'?'활성':'차단'}</span></td><td>{user.lastLoginAt?new Date(user.lastLoginAt).toLocaleString('ko-KR'):'-'}</td><td><button aria-label={`${user.displayName} ${user.status==='active'?'접근 차단':'다시 활성화'}`} disabled={user.id===viewer.id} onClick={()=>toggle(user)}>{user.status==='active'?'접근 차단':'다시 활성화'}</button></td></tr>)}</tbody></table></div></section></div></section>;
 }
 
 function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compact=false}:{market?:Market;value:string;onValueChange:(value:string)=>void;onSelect:(item:SymbolSearchResult)=>void;placeholder:string;compact?:boolean}){
@@ -2241,10 +2465,10 @@ function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compac
   const requestId=useRef(0);
   useEffect(()=>{
     const query=value.trim();
-    if(!open||!query){setResults([]);setLoading(false);setError('');return;}
     const id=++requestId.current;
-    setLoading(true);setError('');
     const timer=window.setTimeout(async()=>{
+      if(!open||!query){setResults([]);setLoading(false);setError('');return;}
+      setLoading(true);setError('');
       try{
         const params=new URLSearchParams({q:query});
         if(market)params.set('market',market);
@@ -2255,14 +2479,14 @@ function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compac
         setResults(payload.results||[]);
       }catch(reason){if(id===requestId.current){setResults([]);setError(reason instanceof Error?reason.message:'종목을 검색하지 못했습니다.');}}
       finally{if(id===requestId.current)setLoading(false);}
-    },250);
+    },open&&query?250:0);
     return()=>window.clearTimeout(timer);
   },[market,open,value]);
   const choose=(item:SymbolSearchResult)=>{setOpen(false);setResults([]);onSelect(item);};
   return <div className={`symbol-search-box${compact?' compact':''}`}>
     <div className="symbol-search-input"><Search size={compact?14:16}/><input value={value} aria-label="종목 이름·티커·코드 검색" placeholder={placeholder} autoComplete="off" onFocus={()=>{if(value.trim())setOpen(true);}} onChange={event=>{onValueChange(event.target.value);setOpen(true);}} onKeyDown={event=>{if(event.key==='Enter'&&results[0]){event.preventDefault();choose(results[0]);}if(event.key==='Escape')setOpen(false);}}/>{loading&&<Loader2 className="spin" size={14}/>}</div>
     {open&&value.trim()&&<div className="symbol-search-results" role="listbox">
-      {results.map(item=><button type="button" role="option" key={`${item.market}-${item.feed}`} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(item)}><b>{item.code}</b><span>{item.name}</span><small>{item.market==='US'?'🇺🇸 미국':'🇰🇷 한국'} · {item.exchangeLabel} · {item.type}</small></button>)}
+      {results.map(item=><button type="button" role="option" aria-selected={false} key={`${item.market}-${item.feed}`} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(item)}><b>{item.code}</b><span>{item.name}</span><small>{item.market==='US'?'🇺🇸 미국':'🇰🇷 한국'} · {item.exchangeLabel} · {item.type}</small></button>)}
       {!loading&&!results.length&&!error&&<p>검색 결과가 없습니다. 이름이나 티커를 다시 확인해주세요.</p>}
       {error&&<p className="search-error">{error}</p>}
     </div>}
@@ -2271,7 +2495,7 @@ function SymbolSearchBox({market,value,onValueChange,onSelect,placeholder,compac
 
 export default function Home(){
   const [state,setState]=useState<{loading:boolean;setup:boolean;user:AuthUser|null}>({loading:true,setup:false,user:null});
-  useEffect(()=>{fetch('/api/auth/status').then(r=>r.json()).then((p:any)=>setState({loading:false,setup:Boolean(p.setupRequired),user:p.user||null})).catch(()=>setState({loading:false,setup:false,user:null}));},[]);
+  useEffect(()=>{fetch('/api/auth/status').then(r=>r.json()).then((p:unknown)=>{const payload=p&&typeof p==='object'?p as {setupRequired?:boolean;user?:AuthUser}:{};setState({loading:false,setup:Boolean(payload.setupRequired),user:payload.user||null});}).catch(()=>setState({loading:false,setup:false,user:null}));},[]);
   if(state.loading)return <main className="auth-page"><Loader2 className="spin"/></main>;
   if(!state.user)return <AuthScreen setup={state.setup} onAuthenticated={user=>setState({loading:false,setup:false,user})}/>;
   return <Dashboard viewer={state.user} onLogout={()=>setState({loading:false,setup:false,user:null})}/>;
@@ -2440,36 +2664,10 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const current =
     availableSymbols.find((item) => item.code === symbol) ??
     availableSymbols[0];
-  const timeframeData = useMemo<Record<Timeframe, Candle[]>>(() => {
-    const useKiwoomTimeframes = dataSource === 'kiwoom';
-    const fifteenMinute = useKiwoomTimeframes
-      ? higherTimeframeData['15m'] || []
-      : higherTimeframeData['15m']?.length
-      ? higherTimeframeData['15m']
-      : resampleBySession(data, timeframeSizes['15m']);
-    const hourly = useKiwoomTimeframes
-      ? higherTimeframeData['1H'] || []
-      : higherTimeframeData['1H']?.length
-      ? higherTimeframeData['1H']
-      : resampleBySession(data, timeframeSizes['1H']);
-    const fourHour = useKiwoomTimeframes
-      ? higherTimeframeData['4H'] || []
-      : higherTimeframeData['4H']?.length
-      ? higherTimeframeData['4H']
-      : resampleBySession(hourly, 4);
-    const daily = useKiwoomTimeframes
-      ? higherTimeframeData['1D'] || []
-      : higherTimeframeData['1D']?.length
-      ? higherTimeframeData['1D']
-      : resampleBySession(data, timeframeSizes['1D']);
-    return {
-      '5m': data,
-      '15m': fifteenMinute,
-      '1H': hourly,
-      '4H': fourHour,
-      '1D': daily,
-    };
-  }, [data, dataSource, higherTimeframeData]);
+  const timeframeData = useMemo(
+    () => buildTimeframeData(data, higherTimeframeData, dataSource),
+    [data, dataSource, higherTimeframeData],
+  );
   const chartData = timeframeData[timeframe];
   const analysisData = chartData;
   const analysis = useMemo(() => analyze(analysisData), [analysisData]);
@@ -2522,8 +2720,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const displayedPrice = activeLiveQuote?.price ?? last;
 
   useEffect(() => {
-    document.title = `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
-  }, [current.currency, current.name, displayedPrice, market]);
+    if (tab === 'analysis' || tab === 'backtest') {
+      document.title = `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
+    } else if (tab === 'admin') {
+      document.title = '회원 관리 · StructureFlow';
+    }
+  }, [current.currency, current.name, displayedPrice, market, tab]);
 
   const entryMidpoint = (analysis.entry[0] + analysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - analysis.stop), 0.000001);
@@ -2980,7 +3182,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           >
             <Settings2 size={17} />
           </button>
-          <button
+          {tab !== 'paper' && tab !== 'admin' && <><button
             className="primary"
             onClick={() => fileInput.current?.click()}
           >
@@ -2993,10 +3195,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             accept=".csv,text/csv"
             onChange={(event) => uploadCsv(event.target.files?.[0])}
           />
+          </>}
           <button className="icon-btn" aria-label="로그아웃" onClick={async()=>{await fetch('/api/auth/logout',{method:'POST'});onLogout();}}><LogOut size={16}/></button>
         </div>
       </header>
 
+      {tab !== 'paper' && tab !== 'admin' && <>
       <section className="controlbar">
         <div className="segmented" aria-label="시장 선택">
           <button
@@ -3139,6 +3343,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           <small>5초 주기 · 키움 REST</small>
         </div>
       </section>
+      </>}
 
       {tab === 'analysis' ? (
         <>
@@ -3527,11 +3732,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </>
       ) : tab === 'paper' ? (
         <PaperTrading
-          market={market}
-          current={current}
-          price={displayedPrice}
-          liveQuotes={liveQuotes}
           preferences={preferences}
+          viewerId={viewer.id}
         />
       ) : tab === 'admin' ? (
         <AdminPanel viewer={viewer}/>
