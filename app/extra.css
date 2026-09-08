@@ -185,6 +185,36 @@ button:disabled {
 .guide-checklist { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .guide-checklist div { display:flex; align-items:center; gap:10px; padding:15px; border:1px solid #243242; border-radius:9px; background:#0c131b; color:#bac6d4; font-size:14px; }
 .guide-checklist svg { flex:0 0 auto; color:var(--green); }
+.guide-site-flow { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.guide-use-step { display:grid; grid-template-columns:34px 1fr; gap:13px; padding:17px; border:1px solid #253244; border-radius:11px; background:#0c131b; }
+.guide-use-step > span { display:grid; place-items:center; width:30px; height:30px; border-radius:9px; background:#173b31; color:var(--green); font:800 12px monospace; }
+.guide-use-step strong { color:#edf3f8; font-size:15px; }
+.guide-use-step p { margin:7px 0 0; color:#8997a9; font-size:13px; line-height:1.65; }
+.guide-subtitle { margin:30px 0 12px; }
+.guide-subtitle h3 { margin:0; color:#eff4fa; font-size:18px; }
+.guide-subtitle p { margin:5px 0 0; color:#7f8da0; font-size:13px; }
+.guide-lecture-map { overflow:hidden; border:1px solid #263446; border-radius:11px; background:#0b121a; }
+.guide-map-head,.guide-map-row { display:grid; grid-template-columns:minmax(145px,.65fr) minmax(180px,.85fr) minmax(280px,1.5fr); gap:16px; align-items:center; padding:13px 16px; }
+.guide-map-head { background:#121c27; color:#8291a4; font-size:12px; }
+.guide-map-row { border-top:1px solid #202c3b; }
+.guide-map-row strong { color:var(--green); font-size:13px; }
+.guide-map-row span { color:#d4dde8; font-size:13px; }
+.guide-map-row p { margin:0; color:#8b99ab; font-size:13px; line-height:1.5; }
+.guide-site-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
+.guide-walkthrough,.guide-practice-tools { padding:20px; border:1px solid #283647; border-radius:11px; background:#0c131b; }
+.guide-walkthrough h3,.guide-practice-tools h3,.guide-mistakes h3 { margin:0 0 15px; color:#edf3f8; font-size:17px; }
+.guide-walkthrough ol { display:grid; gap:9px; margin:0; padding:0; list-style:none; }
+.guide-walkthrough li { display:grid; grid-template-columns:72px 1fr; gap:10px; align-items:center; }
+.guide-walkthrough li b { color:var(--green); font:800 13px monospace; }
+.guide-walkthrough li span { color:#9ba9ba; font-size:13px; line-height:1.5; }
+.guide-practice-tools { display:grid; align-content:start; gap:12px; }
+.guide-practice-tools h3 { margin-bottom:3px; }
+.guide-practice-tools > div { padding:14px; border:1px solid #213142; border-radius:9px; background:#0a1017; }
+.guide-practice-tools b { color:#e8eef5; font-size:14px; }
+.guide-practice-tools p { margin:6px 0 0; color:#8997a9; font-size:13px; line-height:1.6; }
+.guide-mistakes { margin-top:12px; padding:19px 20px; border:1px solid #604a2e; border-radius:11px; background:#19150f; }
+.guide-mistakes h3 { color:#efc178; }
+.guide-mistakes ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 28px; margin:0; padding-left:18px; color:#bcae9a; font-size:13px; line-height:1.55; }
 
 @media (max-width: 980px) {
   .guide-page { width:min(100% - 24px,1320px); }
@@ -193,6 +223,7 @@ button:disabled {
   .guide-arrow { display:none; }
   .guide-two-column { grid-template-columns:1fr; }
   .guide-entry-flow { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .guide-site-flow,.guide-site-columns { grid-template-columns:1fr; }
 }
 @media (max-width: 620px) {
   .guide-hero { padding:24px 20px; }
@@ -202,6 +233,10 @@ button:disabled {
   .guide-swing-example { grid-template-columns:1fr; }
   .guide-swing-example > svg { transform:rotate(90deg); justify-self:center; }
   .guide-memory-rule { flex-direction:column; gap:5px; }
+  .guide-map-head { display:none; }
+  .guide-map-row { grid-template-columns:1fr; gap:5px; padding:15px; }
+  .guide-map-row span::before { content:'화면: '; color:#68788b; }
+  .guide-mistakes ul { grid-template-columns:1fr; }
 }
 .live-watch-cards > button {
   position: relative;

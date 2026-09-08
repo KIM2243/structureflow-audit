@@ -2549,6 +2549,7 @@ function GuidePage() {
           <a href="#guide-zones">가격 영역</a>
           <a href="#guide-entry">진입 규칙</a>
           <a href="#guide-check">최종 체크</a>
+          <a href="#guide-site">사이트 사용법</a>
         </nav>
       </header>
 
@@ -2622,6 +2623,67 @@ function GuidePage() {
             '5m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
             '손절 기준으로 계산된 수량이 감당 가능한가?',
           ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
+        </div>
+      </section>
+
+      <section id="guide-site" className="guide-section">
+        <div className="guide-section-title"><span>06</span><div><h2>강의 개념을 사이트에서 확인하는 방법</h2><p>기능을 따로 외우기보다, 분석에서 연습까지 같은 판단 순서로 사용합니다.</p></div></div>
+
+        <div className="guide-site-flow">
+          {[
+            ['1', '관심종목 등록', '미국·한국 탭을 먼저 고른 뒤 빈 카드의 ‘종목을 추가해 주세요’를 누릅니다. 이름이나 종목코드로 검색해 국가별 최대 3개를 저장하세요.'],
+            ['2', '분석 데이터 불러오기', 'LIVE WATCH 카드에서 종목을 고르고 데이터 불러오기를 누릅니다. 다시 방문하면 마지막 차트를 복원하며, 관심종목 가격은 5초마다 갱신됩니다.'],
+            ['3', '상단 결론 확인', '점수와 LONG·SHORT·관망 상태를 먼저 읽고, 예측 진입 구간·손절·목표는 15분봉 실행 계획으로 해석합니다.'],
+            ['4', '시간대 순서대로 검증', '왼쪽 패널을 1D → 4H → 1H → 15m → 5m 순서로 누릅니다. 상위 봉은 방향, 15분봉은 가격, 5분봉은 체결 트리거입니다.'],
+            ['5', '차트 근거 켜고 끄기', '차트 위의 스윙구조, CHOCH, HH·HL, Premium/Discount, 내부구조, 거래량, VP, OB/FVG, 유동성 버튼으로 필요한 근거만 남깁니다.'],
+            ['6', '실행 계획으로 최종 확인', '오른쪽 실행 계획에서 각 시간대가 충족·대기·차단 중인지 확인합니다. 가격이 구간에 닿았다는 이유만으로 주문하지 않습니다.'],
+          ].map(([step, title, detail]) => (
+            <article key={step} className="guide-use-step"><span>{step}</span><div><strong>{title}</strong><p>{detail}</p></div></article>
+          ))}
+        </div>
+
+        <div className="guide-subtitle"><h3>강의 개념은 화면의 어디에서 보나요?</h3><p>버튼 이름과 확인 질문을 한 쌍으로 기억하세요.</p></div>
+        <div className="guide-lecture-map" role="table" aria-label="강의 개념과 사이트 기능 연결표">
+          <div className="guide-map-head" role="row"><b role="columnheader">강의 개념</b><b role="columnheader">사이트 위치</b><b role="columnheader">확인할 질문</b></div>
+          {[
+            ['유효한 Swing', '스윙구조 · HH·HL·LH·LL', '이 파동이 실제로 이전 구조를 BOS 했는가?'],
+            ['BOS / CHoCH', 'CHOCH · 스윙구조', '추세 지속 확인인가, 첫 전환 경고인가?'],
+            ['Internal Structure', '내부구조', '큰 스윙인가, 아직 범위 안의 작은 움직임인가?'],
+            ['Premium / Discount', 'Premium/Discount', '비싼 곳을 추격하는가, 유리한 영역의 반응을 기다리는가?'],
+            ['VAH / POC / VAL', 'VP', '현재 가격은 Value Area의 위·안·아래 중 어디인가?'],
+            ['다중 시간대 분석', '왼쪽 시간대 구조 · 실행 계획', '1D 방향부터 5m 트리거까지 서로 충돌하지 않는가?'],
+          ].map(([concept, location, question]) => (
+            <div key={concept} className="guide-map-row" role="row"><strong role="cell">{concept}</strong><span role="cell">{location}</span><p role="cell">{question}</p></div>
+          ))}
+        </div>
+
+        <div className="guide-site-columns">
+          <article className="guide-walkthrough">
+            <h3>롱 시나리오 예시</h3>
+            <ol>
+              <li><b>1D·4H</b><span>상승 구조와 거래할 방향을 확인</span></li>
+              <li><b>1H</b><span>상위 방향을 거스르는 구조 변화가 없는지 확인</span></li>
+              <li><b>15m</b><span>Discount·VAL 등 진입 후보와 무효화 가격 확인</span></li>
+              <li><b>5m</b><span>상승 CHoCH/BOS와 거래량 반응이 나온 뒤 실행</span></li>
+              <li><b>모의투자</b><span>같은 종목을 불러와 손절 기준 수량으로 먼저 연습</span></li>
+            </ol>
+          </article>
+          <article className="guide-practice-tools">
+            <h3>모의투자와 백테스트 활용법</h3>
+            <div><b>모의투자</b><p>분석 대시보드와 별도의 종목·차트를 불러와 가상 주문을 연습합니다. 다른 메뉴를 보는 동안에도 불러온 종목의 5초 시세 조회는 계속됩니다.</p></div>
+            <div><b>백테스트</b><p>봉 주기와 조건을 정해 과거 데이터에서 규칙이 어떻게 작동했는지 확인합니다. 결과는 전략 점검 자료이며 미래 수익 보장이 아닙니다.</p></div>
+          </article>
+        </div>
+
+        <div className="guide-mistakes">
+          <h3>자주 생기는 혼선</h3>
+          <ul>
+            <li>모든 지그재그를 유효 스윙으로 세지 않습니다.</li>
+            <li>CHoCH 하나만 보고 바로 진입하지 않습니다.</li>
+            <li>1D·4H의 구조 기준선을 실제 진입 가격으로 착각하지 않습니다.</li>
+            <li>15분 진입 구간 도달과 5분 체결 트리거를 구분합니다.</li>
+            <li>백테스트 결과를 다음 거래의 확정 예측으로 사용하지 않습니다.</li>
+          </ul>
         </div>
       </section>
     </section>
