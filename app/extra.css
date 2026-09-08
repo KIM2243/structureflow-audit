@@ -77,11 +77,44 @@ button:disabled {
   grid-column: 1 / -1;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 5px;
+  width: 100%;
   min-height: 70px;
   border: 1px dashed #283446;
+  background: transparent;
   border-radius: 8px;
   color: #748196;
   font-size: 11px;
+  cursor: pointer;
+}
+.watchlist-market-empty:hover,
+.watchlist-market-empty:focus-visible {
+  color: var(--green);
+  border-color: #2b705c;
+  background: #101d1b;
+  outline: none;
+}
+.watchlist-market-empty strong {
+  color: var(--green);
+  font-size: 10px;
+}
+.analysis-empty-state {
+  min-height: calc(100vh - 216px);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: #778599;
+  text-align: center;
+}
+.analysis-empty-state strong {
+  color: #e8edf5;
+  font-size: 20px;
+}
+.analysis-empty-state p {
+  margin: 0 0 6px;
+  font-size: 13px;
 }
 .live-watch-cards > button {
   position: relative;

@@ -854,6 +854,7 @@ function PriceChart({
   timeframe,
   layers,
   seriesKey,
+  livePrice,
 }: {
   data: Candle[];
   analysis: Analysis;
@@ -861,6 +862,7 @@ function PriceChart({
   timeframe: Timeframe;
   layers: Record<LayerKey, boolean>;
   seriesKey: string;
+  livePrice?: number;
 }) {
   const defaultTargetBars =
     timeframe === '1H' || timeframe === '4H' || timeframe === '1D'
@@ -1053,6 +1055,11 @@ function PriceChart({
   const showForecast = layers.forecast && isViewingLatest;
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
+  const latestVisibleCandle = displayed.at(-1)!;
+  const currentPrice =
+    isViewingLatest && Number.isFinite(livePrice)
+      ? livePrice!
+      : latestVisibleCandle.close;
   const visiblePriceSpan = Math.max(
     candleMaximum - candleMinimum,
     Math.abs(candleMaximum) * 0.0015,
@@ -1070,8 +1077,8 @@ function PriceChart({
       ? [analysis.entry[0], analysis.entry[1], analysis.stop, analysis.target]
       : []),
   ].filter((value) => value >= autoFitMinimum && value <= autoFitMaximum);
-  const fittedMaximum = Math.max(candleMaximum, ...nearbyOverlayValues);
-  const fittedMinimum = Math.min(candleMinimum, ...nearbyOverlayValues);
+  const fittedMaximum = Math.max(candleMaximum, currentPrice, ...nearbyOverlayValues);
+  const fittedMinimum = Math.min(candleMinimum, currentPrice, ...nearbyOverlayValues);
   const fittedSpan = Math.max(fittedMaximum - fittedMinimum, visiblePriceSpan);
   const verticalPadding = fittedSpan * 0.12;
   const maximum = fittedMaximum + verticalPadding;
@@ -1094,11 +1101,9 @@ function PriceChart({
   const clampedY = (value: number) =>
     clampChartValue(y(value), padding, chartBottom);
   const priceTicks = createPriceTicks(minimum, maximum);
-  const latestVisibleCandle = displayed.at(-1)!;
-  const currentPrice = latestVisibleCandle.close;
   const currentPriceY = clampedY(currentPrice);
   const currentPriceDirection =
-    latestVisibleCandle.close >= latestVisibleCandle.open ? 'up' : 'down';
+    currentPrice >= latestVisibleCandle.close ? 'up' : 'down';
   const profileMaximum = Math.max(...analysis.profile, 1);
   const volumeMaximum = Math.max(
     ...displayed.map((candle) => candle.volume),
@@ -2392,6 +2397,7 @@ function PaperTrading({
           timeframe={timeframe}
           layers={layers}
           seriesKey={`paper-${market}-${current.code}-${timeframe}`}
+          livePrice={quote?.price}
         />
       </section>
 
@@ -2664,6 +2670,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const current =
     availableSymbols.find((item) => item.code === symbol) ??
     availableSymbols[0];
+  const hasMarketSelection = Boolean(symbol);
   const timeframeData = useMemo(
     () => buildTimeframeData(data, higherTimeframeData, dataSource),
     [data, dataSource, higherTimeframeData],
@@ -2904,10 +2911,14 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
 
   const chooseMarket = (nextMarket: Market) => {
     setMarket(nextMarket);
-    const next = watchedSymbols.find((item) => item.market === nextMarket) ?? symbols[nextMarket][0];
-    setSymbol(next.code);
+    const next = watchedSymbols.find((item) => item.market === nextMarket);
+    setSymbol(next?.code ?? '');
     setTimeframe('1D');
-    setStatus('종목 선택 후 데이터 불러오기를 누르세요');
+    setStatus(
+      next
+        ? '종목 선택 후 데이터 불러오기를 누르세요'
+        : `${nextMarket === 'US' ? '미국' : '한국'} 관심종목을 먼저 추가하세요.`,
+    );
   };
 
   const chooseSearchedSymbol = (item: SymbolSearchResult) => {
@@ -2983,6 +2994,13 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       if (!response.ok || !payload.items) throw new Error(payload.error || '관심종목을 저장하지 못했습니다.');
       setWatchlist(payload.items);
       setWatchlistDraft(payload.items);
+      const savedForCurrentMarket = payload.items
+        .map(normalizeWatchlistEntry)
+        .filter((item): item is WatchedSymbol => item !== null)
+        .filter((item) => item.market === market);
+      if (!savedForCurrentMarket.some((item) => item.code === symbol)) {
+        setSymbol(savedForCurrentMarket[0]?.code ?? '');
+      }
       setLiveQuotes({});
       setLiveErrors({});
       setWatchlistOpen(false);
@@ -3217,12 +3235,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </button>
         </div>
         <div className="symbol-picker searchable">
-          <SymbolSearchBox value={symbolQuery} onValueChange={setSymbolQuery} onSelect={chooseSearchedSymbol} placeholder={`${current.code} · ${current.name}`}/>
+          <SymbolSearchBox value={symbolQuery} onValueChange={setSymbolQuery} onSelect={chooseSearchedSymbol} placeholder={hasMarketSelection ? `${current.code} · ${current.name}` : '종목 이름 또는 코드 검색'}/>
         </div>
         <button
           className="primary"
           onClick={() => loadMarketData(current)}
-          disabled={loading}
+          disabled={loading || !hasMarketSelection}
         >
           {loading ? (
             <Loader2 className="spin" size={16} />
@@ -3233,8 +3251,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </button>
         <div className="price">
           <strong>
-            {current.currency}
-            {formatPrice(displayedPrice, market)}
+            {hasMarketSelection ? `${current.currency}${formatPrice(displayedPrice, market)}` : '--'}
           </strong>
           {activeLiveQuote ? (
             <span
@@ -3325,7 +3342,17 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               </button>
             );
           })}
-          {!activeWatchedSymbols.length && <div className="watchlist-market-empty">{market === 'US' ? '미국' : '한국'} 관심종목을 최대 3개까지 추가할 수 있습니다.</div>}
+          {!activeWatchedSymbols.length && (
+            <button
+              type="button"
+              className="watchlist-market-empty"
+              onClick={openWatchlistSettings}
+            >
+              <Plus size={15} />
+              <span>{market === 'US' ? '미국' : '한국'} 관심종목을 최대 3개까지 추가할 수 있습니다.</span>
+              <strong>눌러서 종목 설정</strong>
+            </button>
+          )}
         </div>
         <div className="live-watch-actions">
           <button
@@ -3346,6 +3373,16 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       </>}
 
       {tab === 'analysis' ? (
+        !hasMarketSelection ? (
+        <section className="analysis-empty-state">
+          <Database size={34} />
+          <strong>{market === 'US' ? '미국' : '한국'} 분석 종목이 없습니다</strong>
+          <p>위 관심종목 영역을 눌러 종목을 추가하거나, 이름 또는 종목코드로 검색하세요.</p>
+          <button type="button" className="primary" onClick={openWatchlistSettings}>
+            <Plus size={15} /> 종목 설정 열기
+          </button>
+        </section>
+      ) : (
         <>
           <section className="decision-strip">
             <div
@@ -3511,6 +3548,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   timeframe={timeframe}
                   layers={layers}
                   seriesKey={`${market}-${current.code}-${timeframe}`}
+                  livePrice={activeLiveQuote?.price}
                 />
                 <div className="vp-suggestion">
                   <div className="vp-icon">
@@ -3730,6 +3768,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             </aside>
           </section>
         </>
+      )
       ) : tab === 'paper' ? (
         <PaperTrading
           preferences={preferences}
