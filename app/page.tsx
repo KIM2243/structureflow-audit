@@ -2926,13 +2926,13 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     setMarket(nextMarket);
     const next = watchedSymbols.find((item) => item.market === nextMarket);
     setSymbol(next?.code ?? '');
-    setLoadedInstrumentKey('');
     setTimeframe('1D');
-    setStatus(
-      next
-        ? '종목 선택 후 데이터 불러오기를 누르세요'
-        : `${nextMarket === 'US' ? '미국' : '한국'} 관심종목을 먼저 추가하세요.`,
-    );
+    if (next) {
+      void loadMarketData(next);
+      return;
+    }
+    setLoadedInstrumentKey('');
+    setStatus(`${nextMarket === 'US' ? '미국' : '한국'} 관심종목을 먼저 추가하세요.`);
   };
 
   const chooseSearchedSymbol = (item: SymbolSearchResult) => {
@@ -3012,14 +3012,18 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         .map(normalizeWatchlistEntry)
         .filter((item): item is WatchedSymbol => item !== null)
         .filter((item) => item.market === market);
-      if (!savedForCurrentMarket.some((item) => item.code === symbol)) {
-        setSymbol(savedForCurrentMarket[0]?.code ?? '');
+      const nextSelection = !savedForCurrentMarket.some((item) => item.code === symbol)
+        ? savedForCurrentMarket[0]
+        : undefined;
+      if (nextSelection || !savedForCurrentMarket.length) {
+        setSymbol(nextSelection?.code ?? '');
         setLoadedInstrumentKey('');
       }
       setLiveQuotes({});
       setLiveErrors({});
       setWatchlistOpen(false);
       setStatus(`${viewer.displayName} 계정의 관심종목을 저장했습니다.`);
+      if (nextSelection) void loadMarketData(nextSelection);
     } catch (error) {
       setWatchlistError(error instanceof Error ? error.message : '관심종목을 저장하지 못했습니다.');
     } finally {
