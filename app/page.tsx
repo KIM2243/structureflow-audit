@@ -2761,7 +2761,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         setData(payload.candles);
         setHigherTimeframeData(payload.timeframes || {});
         setDataSource('kiwoom');
-        setLoadedInstrumentKey(cacheKey);
+        setLoadedInstrumentKey(`${itemMarket}:${item.code}`);
         setTimeframe('1D');
         setStatus(
           `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
