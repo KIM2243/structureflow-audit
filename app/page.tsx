@@ -11,11 +11,14 @@ import {
 import {
   Activity,
   BarChart3,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  CheckCircle2,
   Database,
   Download,
+  ArrowRight,
   Layers3,
   Loader2,
   Plus,
@@ -2517,10 +2520,118 @@ export default function Home(){
   return <Dashboard viewer={state.user} onLogout={()=>setState({loading:false,setup:false,user:null})}/>;
 }
 
+function GuidePage() {
+  const roadmap = [
+    ['1D', '큰 방향', '상승·하락·전환 중 어디에 있는지 먼저 확인'],
+    ['4H', '셋업 방향', '일봉 안에서 실제로 거래할 스윙 방향을 결정'],
+    ['1H', '구조 확인', '4시간 방향과 보조 구조가 맞는지 확인'],
+    ['15m', '진입 계획', '진입 구간·손절·목표가를 하나로 계산'],
+    ['5m', '체결 트리거', '15분 구간 안에서 실제 반응이 나올 때만 실행'],
+  ] as const;
+  const glossary = [
+    ['HH / HL', '이전보다 높은 고점 / 높은 저점', '상승 구조가 이어지는 단서'],
+    ['LH / LL', '이전보다 낮은 고점 / 낮은 저점', '하락 구조가 이어지는 단서'],
+    ['BOS', '기존 구조 고점·저점을 추세 방향으로 돌파', '현재 구조의 지속을 확인'],
+    ['CHoCH', '기존 흐름과 반대 방향으로 구조가 처음 변함', '전환 가능성 경고이며 단독 진입 신호는 아님'],
+    ['Swing', '실제로 구조 돌파를 만들어낸 큰 파동', '주요 방향과 보호 고점·저점 판단'],
+    ['Internal', '큰 스윙 안에서 생기는 작은 파동', '세부 타이밍 참고, 큰 방향보다 우선하지 않음'],
+  ] as const;
+
+  return (
+    <section className="guide-page">
+      <header className="guide-hero">
+        <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE</div>
+        <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
+        <p>상위 시간대에서 방향을 정하고, 15분봉에서 가격 계획을 세운 뒤, 5분봉 반응으로 실행합니다.</p>
+        <nav className="guide-jumps" aria-label="가이드 바로가기">
+          <a href="#guide-flow">분석 순서</a>
+          <a href="#guide-structure">구조 용어</a>
+          <a href="#guide-zones">가격 영역</a>
+          <a href="#guide-entry">진입 규칙</a>
+          <a href="#guide-check">최종 체크</a>
+        </nav>
+      </header>
+
+      <section id="guide-flow" className="guide-section">
+        <div className="guide-section-title"><span>01</span><div><h2>한 번에 보는 분석 순서</h2><p>아래에서 위로 되돌아가지 말고 왼쪽부터 차례대로 확인합니다.</p></div></div>
+        <div className="guide-roadmap">
+          {roadmap.map(([frame, title, detail], index) => (
+            <article key={frame} className={frame === '15m' ? 'execution' : ''}>
+              <b>{frame}</b><strong>{title}</strong><p>{detail}</p>
+              {index < roadmap.length - 1 && <ArrowRight className="guide-arrow" size={16} />}
+            </article>
+          ))}
+        </div>
+        <div className="guide-memory-rule"><strong>한 줄 기억법</strong><span>1D·4H는 방향 → 1H는 확인 → 15m는 가격 → 5m는 실행</span></div>
+      </section>
+
+      <section id="guide-structure" className="guide-section">
+        <div className="guide-section-title"><span>02</span><div><h2>시장 구조를 읽는 핵심 용어</h2><p>모든 지그재그를 스윙으로 세지 않는 것이 가장 중요합니다.</p></div></div>
+        <div className="guide-glossary">
+          {glossary.map(([term, meaning, use]) => <article key={term}><b>{term}</b><div><strong>{meaning}</strong><p>{use}</p></div></article>)}
+        </div>
+        <article className="guide-lesson-card">
+          <div><span>강의에서 함께 확인한 핵심</span><h3>어느 저점이 새로운 HH를 만들었는가?</h3></div>
+          <div className="guide-swing-example">
+            <div><small>단순 로컬 저점</small><b>저점 → 반등 → 이전 고점 돌파 실패</b><span className="danger">내부 저점</span></div>
+            <ArrowRight size={20} />
+            <div><small>유효한 구조 저점</small><b>저점 → 상승 → 이전 고점 BOS</b><span className="positive">Protected Low</span></div>
+          </div>
+          <p>스윙 저점은 생기는 순간 확정되는 것이 아니라, 그 저점에서 시작한 상승이 이전 구조 고점을 돌파한 뒤에 확정됩니다.</p>
+        </article>
+      </section>
+
+      <section id="guide-zones" className="guide-section guide-two-column">
+        <div>
+          <div className="guide-section-title"><span>03</span><div><h2>가격 영역</h2><p>진입 가격의 위치를 판단하는 도구입니다.</p></div></div>
+          <div className="guide-concept-stack">
+            <article><b>Premium / Discount</b><p>최근 유효 스윙 범위의 위쪽은 Premium, 아래쪽은 Discount입니다. 롱은 비싼 위쪽을 추격하기보다 아래쪽 반응을 우선 봅니다.</p></article>
+            <article><b>VAH / POC / VAL</b><p>VAH는 거래가 집중된 영역의 위쪽, POC는 가장 많이 거래된 가격, VAL은 아래쪽입니다. 지지·저항 후보이지 무조건 반전하는 선은 아닙니다.</p></article>
+            <article><b>OB / FVG · 유동성</b><p>Order Block과 FVG는 반응 후보 영역, 유동성은 손절과 대기 주문이 모일 가능성이 있는 위치입니다. 구조 방향과 함께 볼 때만 의미가 커집니다.</p></article>
+          </div>
+        </div>
+        <aside className="guide-screen-map">
+          <h3>화면에서 무엇을 믿어야 하나요?</h3>
+          <dl>
+            <div><dt>상단 진입·손절·목표</dt><dd><b>15m 고정</b><span>실제 실행 계획</span></dd></div>
+            <div><dt>1D·4H·1H 차트</dt><dd><b>방향 참고</b><span>진입 가격선 없음</span></dd></div>
+            <div><dt>15m 차트</dt><dd><b>가격 계획</b><span>진입·무효화·목표 표시</span></dd></div>
+            <div><dt>5m 차트</dt><dd><b>체결 확인</b><span>구조 반응과 트리거 확인</span></dd></div>
+          </dl>
+        </aside>
+      </section>
+
+      <section id="guide-entry" className="guide-section">
+        <div className="guide-section-title"><span>04</span><div><h2>진입은 가격 도달만으로 끝나지 않습니다</h2><p>StructureFlow의 진입 구간은 주문 명령이 아니라 관찰을 시작할 위치입니다.</p></div></div>
+        <div className="guide-entry-flow">
+          <article><span>1</span><strong>방향 정렬</strong><p>4H 방향과 1H·15m 구조가 충돌하지 않는지 확인</p></article>
+          <article><span>2</span><strong>15m 구간 도달</strong><p>계산된 진입 영역에 가격이 들어오는지 대기</p></article>
+          <article><span>3</span><strong>5m 반응 확인</strong><p>CHOCH/BOS와 거래량 반응으로 실제 방어 여부 확인</p></article>
+          <article><span>4</span><strong>손절 먼저 확정</strong><p>무효화 가격과 허용 위험에 맞춰 수량 계산</p></article>
+        </div>
+        <div className="guide-note"><CircleAlert size={18} /><p><strong>눌림이 오지 않으면 거래하지 않는 전략입니다.</strong> 강한 추세의 돌파·재시험 진입은 별도의 시나리오로 구분해야 하며, 현재 기본 진입 구간과 섞지 않습니다.</p></div>
+      </section>
+
+      <section id="guide-check" className="guide-section">
+        <div className="guide-section-title"><span>05</span><div><h2>주문 전 30초 체크리스트</h2><p>하나라도 설명할 수 없다면 대기합니다.</p></div></div>
+        <div className="guide-checklist">
+          {[
+            '1D와 4H 중 실제로 따를 방향을 말할 수 있는가?',
+            '현재 스윙이 BOS로 확정된 구조인지 확인했는가?',
+            '15m 진입 구간과 무효화 가격을 확인했는가?',
+            '5m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
+            '손절 기준으로 계산된 수량이 감당 가능한가?',
+          ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [market, setMarket] = useState<Market>('US');
   const [symbol, setSymbol] = useState('ONDS');
-  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'admin'>('analysis');
+  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'guide' | 'admin'>('analysis');
   const [symbolQuery,setSymbolQuery]=useState('');
   const [discoveredSymbols,setDiscoveredSymbols]=useState<SymbolSearchResult[]>([]);
   const [data, setData] = useState<Candle[]>(() => demo());
@@ -2746,6 +2857,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       document.title = `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
     } else if (tab === 'admin') {
       document.title = '회원 관리 · StructureFlow';
+    } else if (tab === 'guide') {
+      document.title = '트레이딩 가이드 · StructureFlow';
     }
   }, [current.currency, current.name, displayedPrice, market, tab]);
 
@@ -3213,6 +3326,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           >
             백테스트
           </button>
+          <button
+            className={tab === 'guide' ? 'active' : ''}
+            onClick={() => setTab('guide')}
+          >
+            트레이딩 가이드
+          </button>
           {viewer.role === 'admin' && <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>회원 관리</button>}
         </nav>
         <div className="top-actions">
@@ -3224,7 +3343,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           >
             <Settings2 size={17} />
           </button>
-          {tab !== 'paper' && tab !== 'admin' && <><button
+          {tab !== 'paper' && tab !== 'guide' && tab !== 'admin' && <><button
             className="primary"
             onClick={() => fileInput.current?.click()}
           >
@@ -3242,7 +3361,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </div>
       </header>
 
-      {tab !== 'paper' && tab !== 'admin' && <>
+      {tab !== 'paper' && tab !== 'guide' && tab !== 'admin' && <>
       <section className="controlbar">
         <div className="segmented" aria-label="시장 선택">
           <button
@@ -3821,7 +3940,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </section>
         </>
       )
-      ) : tab === 'paper' ? null : tab === 'admin' ? (
+      ) : tab === 'paper' ? null : tab === 'guide' ? (
+        <GuidePage />
+      ) : tab === 'admin' ? (
         <AdminPanel viewer={viewer}/>
       ) : (
         <section className="backtest-layout">
