@@ -74,7 +74,6 @@ button:disabled {
   gap: 7px;
 }
 .watchlist-market-empty {
-  grid-column: 1 / -1;
   display: grid;
   place-items: center;
   align-content: center;
@@ -94,10 +93,6 @@ button:disabled {
   border-color: #2b705c;
   background: #101d1b;
   outline: none;
-}
-.watchlist-market-empty strong {
-  color: var(--green);
-  font-size: 10px;
 }
 .analysis-empty-state {
   min-height: calc(100vh - 216px);

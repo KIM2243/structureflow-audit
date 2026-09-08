@@ -2089,9 +2089,11 @@ function BacktestTradeChart({
 function PaperTrading({
   preferences,
   viewerId,
+  active,
 }: {
   preferences: Preferences;
   viewerId: string;
+  active: boolean;
 }) {
   const [market, setMarket] = useState<Market>('US');
   const [current, setCurrent] = useState<SymbolItem>(symbols.US[0]);
@@ -2202,8 +2204,9 @@ function PaperTrading({
   }, [current, dataSource, market, refreshQuote]);
 
   useEffect(() => {
+    if (!active) return;
     document.title = `${current.name} 모의투자 / ${current.currency}${formatPrice(price, market)}`;
-  }, [current.currency, current.name, market, price]);
+  }, [active, current.currency, current.name, market, price]);
 
   const [account, setAccount] = useState<PaperAccount>(DEFAULT_PAPER_ACCOUNT);
   const [quantity, setQuantity] = useState(1);
@@ -3355,16 +3358,20 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               </button>
             );
           })}
-          {!activeWatchedSymbols.length && (
-            <button
-              type="button"
-              className="watchlist-market-empty"
-              onClick={openWatchlistSettings}
-            >
-              <Plus size={15} />
-              <span>{market === 'US' ? '미국' : '한국'} 관심종목을 최대 3개까지 추가할 수 있습니다.</span>
-              <strong>눌러서 종목 설정</strong>
-            </button>
+          {Array.from(
+            { length: MAX_WATCHLIST_PER_MARKET - activeWatchedSymbols.length },
+            (_, index) => (
+              <button
+                type="button"
+                className="watchlist-market-empty"
+                key={`add-${market}-${index}`}
+                onClick={openWatchlistSettings}
+                aria-label={`${market === 'US' ? '미국' : '한국'} 관심종목 추가`}
+              >
+                <Plus size={15} />
+                <span>종목을 추가해 주세요</span>
+              </button>
+            ),
           )}
         </div>
         <div className="live-watch-actions">
@@ -3384,6 +3391,14 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </div>
       </section>
       </>}
+
+      <div hidden={tab !== 'paper'}>
+        <PaperTrading
+          preferences={preferences}
+          viewerId={viewer.id}
+          active={tab === 'paper'}
+        />
+      </div>
 
       {tab === 'analysis' ? (
         !hasMarketSelection || !chartMatchesSelection ? (
@@ -3798,12 +3813,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </section>
         </>
       )
-      ) : tab === 'paper' ? (
-        <PaperTrading
-          preferences={preferences}
-          viewerId={viewer.id}
-        />
-      ) : tab === 'admin' ? (
+      ) : tab === 'paper' ? null : tab === 'admin' ? (
         <AdminPanel viewer={viewer}/>
       ) : (
         <section className="backtest-layout">
