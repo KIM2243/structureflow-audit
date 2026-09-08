@@ -2521,6 +2521,13 @@ export default function Home(){
 }
 
 function GuidePage() {
+  const [guideTab, setGuideTab] = useState<'quick' | 'structure' | 'entry' | 'site'>('quick');
+  const guideTabs = [
+    ['quick', '빠른 시작', '분석 순서와 체크리스트'],
+    ['structure', '시장 구조', 'Swing·BOS·CHoCH'],
+    ['entry', '가격·진입', '가격 영역과 실행 규칙'],
+    ['site', '사이트 사용법', '기능별 실제 이용 순서'],
+  ] as const;
   const roadmap = [
     ['1D', '큰 방향', '상승·하락·전환 중 어디에 있는지 먼저 확인'],
     ['4H', '셋업 방향', '일봉 안에서 실제로 거래할 스윙 방향을 결정'],
@@ -2543,16 +2550,25 @@ function GuidePage() {
         <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE</div>
         <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
         <p>상위 시간대에서 방향을 정하고, 15분봉에서 가격 계획을 세운 뒤, 5분봉 반응으로 실행합니다.</p>
-        <nav className="guide-jumps" aria-label="가이드 바로가기">
-          <a href="#guide-flow">분석 순서</a>
-          <a href="#guide-structure">구조 용어</a>
-          <a href="#guide-zones">가격 영역</a>
-          <a href="#guide-entry">진입 규칙</a>
-          <a href="#guide-check">최종 체크</a>
-          <a href="#guide-site">사이트 사용법</a>
-        </nav>
+        <div className="guide-tabs" role="tablist" aria-label="트레이딩 가이드 분류">
+          {guideTabs.map(([id, label, description]) => (
+            <button
+              type="button"
+              role="tab"
+              id={`guide-tab-${id}`}
+              key={id}
+              aria-selected={guideTab === id}
+              aria-controls={`guide-panel-${id}`}
+              className={guideTab === id ? 'active' : ''}
+              onClick={() => setGuideTab(id)}
+            >
+              <strong>{label}</strong><span>{description}</span>
+            </button>
+          ))}
+        </div>
       </header>
 
+      {guideTab === 'quick' && <div id="guide-panel-quick" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-quick">
       <section id="guide-flow" className="guide-section">
         <div className="guide-section-title"><span>01</span><div><h2>한 번에 보는 분석 순서</h2><p>아래에서 위로 되돌아가지 말고 왼쪽부터 차례대로 확인합니다.</p></div></div>
         <div className="guide-roadmap">
@@ -2566,8 +2582,23 @@ function GuidePage() {
         <div className="guide-memory-rule"><strong>한 줄 기억법</strong><span>1D·4H는 방향 → 1H는 확인 → 15m는 가격 → 5m는 실행</span></div>
       </section>
 
+      <section id="guide-check" className="guide-section">
+        <div className="guide-section-title"><span>02</span><div><h2>주문 전 30초 체크리스트</h2><p>하나라도 설명할 수 없다면 대기합니다.</p></div></div>
+        <div className="guide-checklist">
+          {[
+            '1D와 4H 중 실제로 따를 방향을 말할 수 있는가?',
+            '현재 스윙이 BOS로 확정된 구조인지 확인했는가?',
+            '15m 진입 구간과 무효화 가격을 확인했는가?',
+            '5m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
+            '손절 기준으로 계산된 수량이 감당 가능한가?',
+          ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
+        </div>
+      </section>
+      </div>}
+
+      {guideTab === 'structure' && <div id="guide-panel-structure" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-structure">
       <section id="guide-structure" className="guide-section">
-        <div className="guide-section-title"><span>02</span><div><h2>시장 구조를 읽는 핵심 용어</h2><p>모든 지그재그를 스윙으로 세지 않는 것이 가장 중요합니다.</p></div></div>
+        <div className="guide-section-title"><span>01</span><div><h2>시장 구조를 읽는 핵심 용어</h2><p>모든 지그재그를 스윙으로 세지 않는 것이 가장 중요합니다.</p></div></div>
         <div className="guide-glossary">
           {glossary.map(([term, meaning, use]) => <article key={term}><b>{term}</b><div><strong>{meaning}</strong><p>{use}</p></div></article>)}
         </div>
@@ -2581,10 +2612,12 @@ function GuidePage() {
           <p>스윙 저점은 생기는 순간 확정되는 것이 아니라, 그 저점에서 시작한 상승이 이전 구조 고점을 돌파한 뒤에 확정됩니다.</p>
         </article>
       </section>
+      </div>}
 
+      {guideTab === 'entry' && <div id="guide-panel-entry" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-entry">
       <section id="guide-zones" className="guide-section guide-two-column">
         <div>
-          <div className="guide-section-title"><span>03</span><div><h2>가격 영역</h2><p>진입 가격의 위치를 판단하는 도구입니다.</p></div></div>
+          <div className="guide-section-title"><span>01</span><div><h2>가격 영역</h2><p>진입 가격의 위치를 판단하는 도구입니다.</p></div></div>
           <div className="guide-concept-stack">
             <article><b>Premium / Discount</b><p>최근 유효 스윙 범위의 위쪽은 Premium, 아래쪽은 Discount입니다. 롱은 비싼 위쪽을 추격하기보다 아래쪽 반응을 우선 봅니다.</p></article>
             <article><b>VAH / POC / VAL</b><p>VAH는 거래가 집중된 영역의 위쪽, POC는 가장 많이 거래된 가격, VAL은 아래쪽입니다. 지지·저항 후보이지 무조건 반전하는 선은 아닙니다.</p></article>
@@ -2603,7 +2636,7 @@ function GuidePage() {
       </section>
 
       <section id="guide-entry" className="guide-section">
-        <div className="guide-section-title"><span>04</span><div><h2>진입은 가격 도달만으로 끝나지 않습니다</h2><p>StructureFlow의 진입 구간은 주문 명령이 아니라 관찰을 시작할 위치입니다.</p></div></div>
+        <div className="guide-section-title"><span>02</span><div><h2>진입은 가격 도달만으로 끝나지 않습니다</h2><p>StructureFlow의 진입 구간은 주문 명령이 아니라 관찰을 시작할 위치입니다.</p></div></div>
         <div className="guide-entry-flow">
           <article><span>1</span><strong>방향 정렬</strong><p>4H 방향과 1H·15m 구조가 충돌하지 않는지 확인</p></article>
           <article><span>2</span><strong>15m 구간 도달</strong><p>계산된 진입 영역에 가격이 들어오는지 대기</p></article>
@@ -2612,22 +2645,11 @@ function GuidePage() {
         </div>
         <div className="guide-note"><CircleAlert size={18} /><p><strong>눌림이 오지 않으면 거래하지 않는 전략입니다.</strong> 강한 추세의 돌파·재시험 진입은 별도의 시나리오로 구분해야 하며, 현재 기본 진입 구간과 섞지 않습니다.</p></div>
       </section>
+      </div>}
 
-      <section id="guide-check" className="guide-section">
-        <div className="guide-section-title"><span>05</span><div><h2>주문 전 30초 체크리스트</h2><p>하나라도 설명할 수 없다면 대기합니다.</p></div></div>
-        <div className="guide-checklist">
-          {[
-            '1D와 4H 중 실제로 따를 방향을 말할 수 있는가?',
-            '현재 스윙이 BOS로 확정된 구조인지 확인했는가?',
-            '15m 진입 구간과 무효화 가격을 확인했는가?',
-            '5m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
-            '손절 기준으로 계산된 수량이 감당 가능한가?',
-          ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
-        </div>
-      </section>
-
+      {guideTab === 'site' && <div id="guide-panel-site" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-site">
       <section id="guide-site" className="guide-section">
-        <div className="guide-section-title"><span>06</span><div><h2>강의 개념을 사이트에서 확인하는 방법</h2><p>기능을 따로 외우기보다, 분석에서 연습까지 같은 판단 순서로 사용합니다.</p></div></div>
+        <div className="guide-section-title"><span>01</span><div><h2>강의 개념을 사이트에서 확인하는 방법</h2><p>기능을 따로 외우기보다, 분석에서 연습까지 같은 판단 순서로 사용합니다.</p></div></div>
 
         <div className="guide-site-flow">
           {[
@@ -2686,6 +2708,7 @@ function GuidePage() {
           </ul>
         </div>
       </section>
+      </div>}
     </section>
   );
 }

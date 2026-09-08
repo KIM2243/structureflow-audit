@@ -127,9 +127,16 @@ button:disabled {
 .guide-kicker { display:flex; align-items:center; gap:8px; color:var(--green); font:800 12px monospace; letter-spacing:.08em; }
 .guide-hero h1 { margin:14px 0 8px; color:#f4f7fb; font-size:32px; line-height:1.25; }
 .guide-hero > p { margin:0; color:#9aa8ba; font-size:16px; line-height:1.7; }
-.guide-jumps { display:flex; flex-wrap:wrap; gap:8px; margin-top:24px; }
-.guide-jumps a { padding:9px 13px; border:1px solid #2a3748; border-radius:999px; color:#b9c5d5; text-decoration:none; font-size:13px; }
-.guide-jumps a:hover,.guide-jumps a:focus-visible { border-color:var(--green); color:var(--green); outline:none; }
+.guide-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-top:24px; }
+.guide-tabs button { min-width:0; padding:12px 14px; border:1px solid #2a3748; border-radius:10px; background:#0a1119; color:#9cabbc; text-align:left; cursor:pointer; }
+.guide-tabs button:hover,.guide-tabs button:focus-visible { border-color:#3b806d; outline:none; }
+.guide-tabs button.active { border-color:var(--green); background:#0d211c; box-shadow:inset 0 -2px 0 var(--green); }
+.guide-tabs strong,.guide-tabs span { display:block; }
+.guide-tabs strong { color:#e4ebf3; font-size:14px; }
+.guide-tabs button.active strong { color:var(--green); }
+.guide-tabs span { margin-top:4px; color:#738195; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.guide-tab-panel { animation:guide-panel-in .18s ease-out; }
+@keyframes guide-panel-in { from { opacity:.35; transform:translateY(4px); } to { opacity:1; transform:none; } }
 .guide-section { padding:42px 4px 0; scroll-margin-top:70px; }
 .guide-section-title { display:flex; align-items:flex-start; gap:13px; margin-bottom:20px; }
 .guide-section-title > span { display:grid; place-items:center; width:34px; height:34px; border:1px solid #2d8067; border-radius:9px; color:var(--green); font:800 12px monospace; }
@@ -224,6 +231,7 @@ button:disabled {
   .guide-two-column { grid-template-columns:1fr; }
   .guide-entry-flow { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .guide-site-flow,.guide-site-columns { grid-template-columns:1fr; }
+  .guide-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 620px) {
   .guide-hero { padding:24px 20px; }
@@ -237,6 +245,9 @@ button:disabled {
   .guide-map-row { grid-template-columns:1fr; gap:5px; padding:15px; }
   .guide-map-row span::before { content:'화면: '; color:#68788b; }
   .guide-mistakes ul { grid-template-columns:1fr; }
+  .guide-tabs { display:flex; margin-right:-20px; overflow-x:auto; padding-right:20px; scrollbar-width:none; }
+  .guide-tabs::-webkit-scrollbar { display:none; }
+  .guide-tabs button { flex:0 0 150px; }
 }
 .live-watch-cards > button {
   position: relative;
