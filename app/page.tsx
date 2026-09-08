@@ -2714,11 +2714,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       }),
     [entryAnalyses, timeframeSnapshots],
   );
-  const selectedDirection = directionLabel(analysis.bias);
+  const executionAnalysis = entryAnalyses['15m'];
+  const selectedDirection = directionLabel(executionAnalysis.bias);
   const timeframeContext = multiTimeframeContext(
     timeframeSnapshots['1D'].trend,
     timeframeSnapshots['4H'].trend,
-    analysis.bias,
+    executionAnalysis.bias,
   );
   const draftBacktestData = timeframeData[backtestTimeframe];
   const backtestData = timeframeData[appliedBacktestTimeframe];
@@ -2745,8 +2746,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     }
   }, [current.currency, current.name, displayedPrice, market, tab]);
 
-  const entryMidpoint = (analysis.entry[0] + analysis.entry[1]) / 2;
-  const unitRisk = Math.max(Math.abs(entryMidpoint - analysis.stop), 0.000001);
+  const entryMidpoint = (executionAnalysis.entry[0] + executionAnalysis.entry[1]) / 2;
+  const unitRisk = Math.max(Math.abs(entryMidpoint - executionAnalysis.stop), 0.000001);
   const riskBudget = preferences.capital * (preferences.riskPct / 100);
   const positionSize = Math.max(0, Math.floor(riskBudget / unitRisk));
   const positionNotional = positionSize * entryMidpoint;
@@ -3436,22 +3437,22 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             <div
               className="score-ring"
               style={{
-                background: `radial-gradient(circle,#0d131b 55%,transparent 57%),conic-gradient(var(--green) ${analysis.score}%,#252d38 0)`,
+                background: `radial-gradient(circle,#0d131b 55%,transparent 57%),conic-gradient(var(--green) ${executionAnalysis.score}%,#252d38 0)`,
               }}
             >
-              <b>{analysis.score}</b>
+              <b>{executionAnalysis.score}</b>
               <span>/100</span>
             </div>
             <div className="directive">
               <div>
                 <i />
                 <strong
-                  className={`direction-chip ${analysis.bias.toLowerCase()}`}
+                  className={`direction-chip ${executionAnalysis.bias.toLowerCase()}`}
                 >
                   {selectedDirection}
                 </strong>
                 <span>
-                  {analysis.bias} · 신뢰도 {analysis.confidence}% · {timeframe}
+                  {executionAnalysis.bias} · 신뢰도 {executionAnalysis.confidence}% · 15m 실행 기준
                 </span>
               </div>
               <h1>
@@ -3459,36 +3460,36 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               </h1>
               <p>
                 {timeframeSnapshots[timeframe].event} · {timeframeContext} ·
-                실행 기준 {multiTimeframeEntry.entryTimeframe}
+                15m 진입 구간 · 5m 체결 트리거
               </p>
             </div>
             <div className="metric">
               <small>예측 진입 구간</small>
               <strong>
                 {current.currency}
-                {formatPrice(analysis.entry[0], market)} –{' '}
-                {formatPrice(analysis.entry[1], market)}
+                {formatPrice(executionAnalysis.entry[0], market)} –{' '}
+                {formatPrice(executionAnalysis.entry[1], market)}
               </strong>
               <span>
-                현재가 대비 {analysis.entryForecast.distancePct >= 0 ? '+' : ''}
-                {analysis.entryForecast.distancePct.toFixed(2)}%
+                현재가 대비 {executionAnalysis.entryForecast.distancePct >= 0 ? '+' : ''}
+                {executionAnalysis.entryForecast.distancePct.toFixed(2)}%
               </span>
             </div>
             <div className="metric danger">
               <small>손절 / 무효화</small>
               <strong>
                 {current.currency}
-                {formatPrice(analysis.stop, market)}
+                {formatPrice(executionAnalysis.stop, market)}
               </strong>
-              <span>{analysis.atr.toFixed(2)} ATR 기준</span>
+              <span>{executionAnalysis.atr.toFixed(2)} ATR 기준</span>
             </div>
             <div className="metric">
               <small>목표가</small>
               <strong>
                 {current.currency}
-                {formatPrice(analysis.target, market)}
+                {formatPrice(executionAnalysis.target, market)}
               </strong>
-              <span>구조 목표 · {analysis.rr.toFixed(1)}R</span>
+              <span>구조 목표 · {executionAnalysis.rr.toFixed(1)}R</span>
             </div>
             <button
               className="review"
@@ -3702,23 +3703,23 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                     <Zap size={15} /> 조건부 진입 예측
                   </span>
                   <b
-                    className={`forecast-status ${analysis.entryForecast.status.toLowerCase()}`}
+                    className={`forecast-status ${executionAnalysis.entryForecast.status.toLowerCase()}`}
                   >
-                    {analysis.entryForecast.status === 'READY'
+                    {executionAnalysis.entryForecast.status === 'READY'
                       ? '조건 충족'
-                      : analysis.entryForecast.status === 'WAIT'
+                      : executionAnalysis.entryForecast.status === 'WAIT'
                         ? '대기'
                         : '보류'}
                   </b>
                 </header>
                 <h3>
                   {current.currency}
-                  {formatPrice(analysis.entry[0], market)} –{' '}
-                  {formatPrice(analysis.entry[1], market)}
+                  {formatPrice(executionAnalysis.entry[0], market)} –{' '}
+                  {formatPrice(executionAnalysis.entry[1], market)}
                 </h3>
-                <p>구조 + Value Area + 20봉 추세 + ATR 기반</p>
+                <p>15분봉 구조 + Value Area + 20봉 추세 + ATR 기반</p>
                 <ul className="forecast-reasons">
-                  {analysis.entryForecast.reasons.map((reason) => (
+                  {executionAnalysis.entryForecast.reasons.map((reason) => (
                     <li
                       key={reason.label}
                       className={reason.state.toLowerCase()}
@@ -3740,15 +3741,15 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <dl>
                   <div>
                     <dt>손절</dt>
-                    <dd>{formatPrice(analysis.stop, market)}</dd>
+                    <dd>{formatPrice(executionAnalysis.stop, market)}</dd>
                   </div>
                   <div>
                     <dt>목표</dt>
-                    <dd>{formatPrice(analysis.target, market)}</dd>
+                    <dd>{formatPrice(executionAnalysis.target, market)}</dd>
                   </div>
                   <div>
                     <dt>R:R</dt>
-                    <dd className="positive">{analysis.rr.toFixed(1)}R</dd>
+                    <dd className="positive">{executionAnalysis.rr.toFixed(1)}R</dd>
                   </div>
                 </dl>
               </article>
