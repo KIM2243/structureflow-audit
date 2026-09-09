@@ -35,13 +35,17 @@ export function evaluateMultiTimeframeEntry({
 }: EntryInput): MultiTimeframeEntry {
   const dailyDirection = trendDirection(snapshots['1D'].trend);
   const middleDirection = trendDirection(snapshots['4H'].trend);
-  const direction =
-    middleDirection === 'NEUTRAL' ? dailyDirection : middleDirection;
+  const direction = middleDirection;
   const confirmationDirection = analyses['1H'].bias;
   const timingDirection = analyses['15m'].bias;
   const triggerDirection = analyses['5m'].bias;
-  const entryTimeframe =
-    analyses['5m'].entryForecast.status === 'READY' ? '5m' : '15m';
+  const entryTimeframe = '15m';
+  const plan = analyses['15m'].entryForecast;
+  const trigger = analyses['5m'].entryForecast;
+  const touchTime = Date.parse(plan.zoneTouchTime ?? '');
+  const reactionTime = Date.parse(trigger.reactionTime ?? '');
+  const triggered = trigger.reactionConfirmed && Number.isFinite(touchTime)
+    && Number.isFinite(reactionTime) && reactionTime > touchTime;
 
   const steps: MultiTimeframeEntryStep[] = [
     {
@@ -95,11 +99,13 @@ export function evaluateMultiTimeframeEntry({
         direction === 'NEUTRAL' || timingDirection === 'NEUTRAL'
           ? 'WAIT'
           : timingDirection === direction
-            ? 'PASS'
+            ? plan.zoneValid && plan.locationConfirmed && analyses['15m'].rr >= 2 ? 'PASS' : 'WAIT'
             : 'BLOCK',
       detail:
         timingDirection === direction
-          ? `15분 분석이 ${directionText(direction)} 타이밍을 지지합니다.`
+          ? plan.zoneValid && plan.locationConfirmed && analyses['15m'].rr >= 2
+            ? '15분 구조 영역 도달 · 유리한 반범위 · 2R 이상 확인'
+            : '15분 구조 영역 도달과 유효한 2R 가격 계획을 기다립니다.'
           : timingDirection === 'NEUTRAL'
             ? '15분 진입 타이밍을 기다립니다.'
             : '15분 방향이 상위 추세와 반대입니다.',
@@ -112,15 +118,15 @@ export function evaluateMultiTimeframeEntry({
           ? 'WAIT'
           : triggerDirection !== direction
             ? 'BLOCK'
-            : analyses['5m'].entryForecast.status === 'READY'
+            : triggered
               ? 'PASS'
               : 'WAIT',
       detail:
         triggerDirection !== direction && triggerDirection !== 'NEUTRAL'
           ? '5분 트리거가 상위 추세와 반대입니다.'
-          : analyses['5m'].entryForecast.status === 'READY'
-            ? '5분 조건부 진입 트리거가 충족됐습니다.'
-            : '5분 가격이 예측 구간과 트리거에 도달하기를 기다립니다.',
+          : triggered
+            ? '15분 영역 접촉 이후 5분 완료 봉의 내부 구조 돌파 확인'
+            : '15분 영역 접촉 이후의 새로운 5분 구조 반응을 기다립니다. (강의 1분의 시스템 대안)',
     },
   ];
 

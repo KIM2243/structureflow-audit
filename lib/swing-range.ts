@@ -10,7 +10,7 @@ export function getRecentSwingRange(
   pivots: readonly Pivot[],
   endIndex: number,
 ): SwingRange | null {
-  const confirmed = pivots.filter((pivot) => pivot.index < endIndex);
+  const confirmed = pivots.filter((pivot) => (pivot.confirmedAt ?? pivot.index) < endIndex);
   const latest = confirmed.at(-1);
   if (!latest) return null;
 

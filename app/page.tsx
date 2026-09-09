@@ -71,7 +71,7 @@ import {
   type EntryTimeframe,
   type MultiTimeframeEntryStep,
 } from '@/lib/multi-timeframe';
-import { getRecentSwingRange } from '@/lib/swing-range';
+import { mapMarketStructure } from '@/lib/market-structure';
 
 type Market = 'US' | 'KR';
 type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
@@ -1056,7 +1056,7 @@ function PriceChart({
     (level) => level.index >= offset && level.index < endIndex,
   );
   const showForecast =
-    layers.forecast && isViewingLatest && timeframe === '15m';
+    layers.forecast && isViewingLatest && timeframe === '15m' && analysis.entryForecast.zoneValid;
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
   const latestVisibleCandle = displayed.at(-1)!;
@@ -1210,7 +1210,7 @@ function PriceChart({
       event.price >= minimum &&
       event.price <= maximum,
   );
-  const dealingRange = getRecentSwingRange(analysis.pivots, endIndex);
+  const dealingRange = isViewingLatest ? analysis.confirmedRange : mapMarketStructure(data.slice(0, Math.max(0, endIndex - 1))).range;
   const equilibriumY = dealingRange
     ? clampedY(dealingRange.equilibrium)
     : null;
@@ -1226,6 +1226,8 @@ function PriceChart({
           {isViewingLatest ? '최신 구간' : `${offset + 1}–${endIndex}봉`}
         </span>
         <span className="soft">Y축 · 화면 맞춤</span>
+        <span className="soft">{analysis.marketPhase}</span>
+        {analysis.protectedPrice !== undefined && <span className="soft">보호 수준 {formatPrice(analysis.protectedPrice, market)} · 종가 이탈 시 전환 경고</span>}
         {layers.structure && (
           <span
             className={`structure-state ${analysis.structureState.swingTrend.toLowerCase()}`}
@@ -1262,7 +1264,7 @@ function PriceChart({
             {showForecast
               ? `진입 예측 · ${analysis.entryForecast.status}`
               : timeframe === '15m'
-                ? '진입 예측 · 최신 구간에서 표시'
+                ? analysis.entryForecast.zoneValid ? '진입 예측 · 최신 구간에서 표시' : '진입 계획 · 구조 영역 확정 대기'
                 : '진입 예측 · 15m 차트에서 표시'}
           </span>
         )}
@@ -1638,7 +1640,7 @@ function PriceChart({
                   y={y(level.price) - 4}
                   className="liquidity-label"
                 >
-                  {level.kind === 'BUY_SIDE' ? 'BSL' : 'SSL'} ×{level.touches}
+                  {level.kind === 'BUY_SIDE' ? 'BSL' : 'SSL'} ×{level.touches} · {level.status === 'SWEPT' ? '스윕 후보' : level.status === 'BROKEN' ? '돌파됨' : '미소진 후보'}
                 </text>
               </g>
             ))}
@@ -2550,6 +2552,7 @@ function GuidePage() {
         <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE</div>
         <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
         <p>상위 시간대에서 방향을 정하고, 15분봉에서 가격 계획을 세운 뒤, 5분봉 반응으로 실행합니다.</p>
+        <p>강의 주요 장면에서 확인한 원칙을 보수적으로 구현했습니다. 전체 강의의 모든 예외를 재현한 인증된 전략은 아니며, 아래의 시스템 규칙은 강의 원문과 구분합니다.</p>
         <div className="guide-tabs" role="tablist" aria-label="트레이딩 가이드 분류">
           {guideTabs.map(([id, label, description]) => (
             <button
@@ -2610,6 +2613,8 @@ function GuidePage() {
             <div><small>유효한 구조 저점</small><b>저점 → 상승 → 이전 고점 BOS</b><span className="positive">Protected Low</span></div>
           </div>
           <p>스윙 저점은 생기는 순간 확정되는 것이 아니라, 그 저점에서 시작한 상승이 이전 구조 고점을 돌파한 뒤에 확정됩니다.</p>
+          <p>현재 구현: 꼬리 가격을 기준선으로 사용하되 종가 돌파만 인정합니다. 보호 수준을 깨면 전환 대기, 반대 방향 후속 BOS로 새 추세를 확정합니다. 초기 범위는 첫 두 봉에서 시작하는 시스템 초기화 규칙이므로 데이터 시작점에 영향을 받습니다.</p>
+          <p>Internal은 직전 봉의 고점·저점 확장 실패를 다음 봉에서 확인하는 별도 지도입니다. 내부 CHoCH만으로 큰 스윙을 뒤집지 않습니다. 진행 중일 수 있는 마지막 봉은 구조 확정에서 제외합니다.</p>
         </article>
       </section>
       </div>}
@@ -2619,9 +2624,9 @@ function GuidePage() {
         <div>
           <div className="guide-section-title"><span>01</span><div><h2>가격 영역</h2><p>진입 가격의 위치를 판단하는 도구입니다.</p></div></div>
           <div className="guide-concept-stack">
-            <article><b>Premium / Discount</b><p>최근 유효 스윙 범위의 위쪽은 Premium, 아래쪽은 Discount입니다. 롱은 비싼 위쪽을 추격하기보다 아래쪽 반응을 우선 봅니다.</p></article>
-            <article><b>VAH / POC / VAL</b><p>VAH는 거래가 집중된 영역의 위쪽, POC는 가장 많이 거래된 가격, VAL은 아래쪽입니다. 지지·저항 후보이지 무조건 반전하는 선은 아닙니다.</p></article>
-            <article><b>OB / FVG · 유동성</b><p>Order Block과 FVG는 반응 후보 영역, 유동성은 손절과 대기 주문이 모일 가능성이 있는 위치입니다. 구조 방향과 함께 볼 때만 의미가 커집니다.</p></article>
+            <article><b>Premium / Discount</b><p>보호 수준과 조정 시작으로 확정한 스윙 극점 사이의 50%가 균형입니다. 위는 Premium, 아래는 Discount입니다. 범위가 아직 확정되지 않으면 표시하지 않습니다.</p></article>
+            <article><b>VAH / POC / VAL · 보조 지표</b><p>봉의 대표가격에 거래량을 배분한 근사 분포입니다. 실제 체결가별 거래량이 아니며 진입·손절·목표를 결정하지 않습니다. 강의의 구조 영역과 같은 개념이 아닙니다.</p></article>
+            <article><b>OB / FVG · 유동성</b><p>보조 후보이지 기관 주문의 증거가 아닙니다. 비슷한 고저점의 첫 이탈이 종가로 복귀하면 스윕 후보, 밖에서 마감하면 돌파로 구분합니다. 유인(Inducement)이나 주문 누적은 OHLCV만으로 확정하지 않습니다.</p></article>
           </div>
         </div>
         <aside className="guide-screen-map">
@@ -2644,6 +2649,11 @@ function GuidePage() {
           <article><span>4</span><strong>손절 먼저 확정</strong><p>무효화 가격과 허용 위험에 맞춰 수량 계산</p></article>
         </div>
         <div className="guide-note"><CircleAlert size={18} /><p><strong>눌림이 오지 않으면 거래하지 않는 전략입니다.</strong> 강한 추세의 돌파·재시험 진입은 별도의 시나리오로 구분해야 하며, 현재 기본 진입 구간과 섞지 않습니다.</p></div>
+        <div className="guide-concept-stack">
+          <article><b>강의 원칙 → 시스템의 구체적인 규칙</b><p>15분 BOS 기원 봉의 꼬리~몸통을 후보 영역으로 잡고 유리한 반범위로 제한합니다. 손절 완충 0.1 ATR, 최소 2R, 최근 완료 3봉 안의 구조 반응은 시스템 선택값이며 강의의 정확한 수치가 아닙니다.</p></article>
+          <article><b>4H → 15m → 5m</b><p>4시간 스윙이 방향, 15분 영역이 가격, 영역 접촉 이후 5분 내부 구조 돌파가 트리거입니다. 1D·1H는 참고입니다. 강의의 1분 실행 예시와 달리 이 사이트는 5분 데이터를 사용하므로 같은 타이밍이나 성과를 보장하지 않습니다.</p></article>
+          <article><b>숫자를 읽는 법</b><p>목표는 반대편 약한 스윙 극점 후보입니다. 영역이 없거나 2R 미만이면 보류합니다. 조건 충족 점수는 체크리스트 집계이지 승률이 아닙니다. 구간 안의 가격과 접촉 이후 새 구조 반응까지 확인해야 최종 준비 상태입니다.</p></article>
+        </div>
       </section>
       </div>}
 
@@ -2685,7 +2695,7 @@ function GuidePage() {
             <ol>
               <li><b>1D·4H</b><span>상승 구조와 거래할 방향을 확인</span></li>
               <li><b>1H</b><span>상위 방향을 거스르는 구조 변화가 없는지 확인</span></li>
-              <li><b>15m</b><span>Discount·VAL 등 진입 후보와 무효화 가격 확인</span></li>
+              <li><b>15m</b><span>BOS 기원 영역·Discount와 무효화 가격 확인 (VAL은 보조)</span></li>
               <li><b>5m</b><span>상승 CHoCH/BOS와 거래량 반응이 나온 뒤 실행</span></li>
               <li><b>모의투자</b><span>같은 종목을 불러와 손절 기준 수량으로 먼저 연습</span></li>
             </ol>
@@ -2693,7 +2703,7 @@ function GuidePage() {
           <article className="guide-practice-tools">
             <h3>모의투자와 백테스트 활용법</h3>
             <div><b>모의투자</b><p>분석 대시보드와 별도의 종목·차트를 불러와 가상 주문을 연습합니다. 다른 메뉴를 보는 동안에도 불러온 종목의 5초 시세 조회는 계속됩니다.</p></div>
-            <div><b>백테스트</b><p>봉 주기와 조건을 정해 과거 데이터에서 규칙이 어떻게 작동했는지 확인합니다. 결과는 전략 점검 자료이며 미래 수익 보장이 아닙니다.</p></div>
+            <div><b>백테스트</b><p>현재 백테스트는 기존 고저가 돌파+20MA 전략입니다. 이번 구조 영역 눌림·다중 시간대 진입과 다른 전략이므로 그 승률을 대시보드 전략의 성과로 해석하지 마세요. 동기화된 다중 시간대 성과 검증은 별도 작업이 필요합니다.</p></div>
           </article>
         </div>
 
@@ -2950,7 +2960,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const entryMidpoint = (executionAnalysis.entry[0] + executionAnalysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - executionAnalysis.stop), 0.000001);
   const riskBudget = preferences.capital * (preferences.riskPct / 100);
-  const positionSize = Math.max(0, Math.floor(riskBudget / unitRisk));
+  const positionSize = executionAnalysis.entryForecast.zoneValid ? Math.max(0, Math.floor(riskBudget / unitRisk)) : 0;
   const positionNotional = positionSize * entryMidpoint;
 
   const loadMarketData = useCallback(
@@ -3659,7 +3669,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   {selectedDirection}
                 </strong>
                 <span>
-                  {executionAnalysis.bias} · 신뢰도 {executionAnalysis.confidence}% · 15m 실행 기준
+                  {executionAnalysis.bias} · 조건 충족 {executionAnalysis.confidence}/100 (승률 아님) · 15m 실행 기준
                 </span>
               </div>
               <h1>
@@ -3673,28 +3683,23 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             <div className="metric">
               <small>예측 진입 구간</small>
               <strong>
-                {current.currency}
-                {formatPrice(executionAnalysis.entry[0], market)} –{' '}
-                {formatPrice(executionAnalysis.entry[1], market)}
+                {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.entry[0], market)} – ${formatPrice(executionAnalysis.entry[1], market)}` : '구조 영역 확인 대기'}
               </strong>
               <span>
-                현재가 대비 {executionAnalysis.entryForecast.distancePct >= 0 ? '+' : ''}
-                {executionAnalysis.entryForecast.distancePct.toFixed(2)}%
+                {executionAnalysis.entryForecast.zoneValid ? `현재가 대비 ${executionAnalysis.entryForecast.distancePct.toFixed(2)}%` : '임의의 진입 가격을 만들지 않습니다'}
               </span>
             </div>
             <div className="metric danger">
               <small>손절 / 무효화</small>
               <strong>
-                {current.currency}
-                {formatPrice(executionAnalysis.stop, market)}
+                {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.stop, market)}` : '—'}
               </strong>
-              <span>{executionAnalysis.atr.toFixed(2)} ATR 기준</span>
+              <span>구조 기원 바깥 · 0.1 ATR 완충</span>
             </div>
             <div className="metric">
               <small>목표가</small>
               <strong>
-                {current.currency}
-                {formatPrice(executionAnalysis.target, market)}
+                {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.target, market)}` : '—'}
               </strong>
               <span>구조 목표 · {executionAnalysis.rr.toFixed(1)}R</span>
             </div>
@@ -3763,14 +3768,10 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 })(),
               )}
               <div className="wyckoff">
-                <small>VOLUME / WYCKOFF 단서</small>
-                <strong>
-                  {analysis.bias === 'LONG'
-                    ? 'Accumulation / LPS 후보'
-                    : 'Distribution / LPSY 후보'}
-                </strong>
+                <small>스윙 / 내부 시장 단계</small>
+                <strong>{analysis.marketPhase}</strong>
                 <p>
-                  구조와 거래량 프로파일 기반 가설이며 확정 판정이 아닙니다.
+                  스윙과 내부 방향의 조합입니다. 실제 기관 주문이나 매집을 확인한 것은 아닙니다.
                 </p>
                 <div>
                   <span style={{ width: `${analysis.confidence}%` }} />
@@ -3912,7 +3913,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   <b
                     className={`forecast-status ${executionAnalysis.entryForecast.status.toLowerCase()}`}
                   >
-                    {executionAnalysis.entryForecast.status === 'READY'
+                    {multiTimeframeEntry.status === 'READY'
                       ? '조건 충족'
                       : executionAnalysis.entryForecast.status === 'WAIT'
                         ? '대기'
@@ -3920,11 +3921,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   </b>
                 </header>
                 <h3>
-                  {current.currency}
-                  {formatPrice(executionAnalysis.entry[0], market)} –{' '}
-                  {formatPrice(executionAnalysis.entry[1], market)}
+                  {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.entry[0], market)} – ${formatPrice(executionAnalysis.entry[1], market)}` : '유효 구조 영역 대기'}
                 </h3>
-                <p>15분봉 구조 + Value Area + 20봉 추세 + ATR 기반</p>
+                <p>15분 BOS 기원 영역 · 유리한 반범위 · 5분 반응 확인. VP는 보조입니다.</p>
                 <ul className="forecast-reasons">
                   {executionAnalysis.entryForecast.reasons.map((reason) => (
                     <li
@@ -3948,11 +3947,11 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <dl>
                   <div>
                     <dt>손절</dt>
-                    <dd>{formatPrice(executionAnalysis.stop, market)}</dd>
+                    <dd>{executionAnalysis.entryForecast.zoneValid ? formatPrice(executionAnalysis.stop, market) : '—'}</dd>
                   </div>
                   <div>
                     <dt>목표</dt>
-                    <dd>{formatPrice(executionAnalysis.target, market)}</dd>
+                    <dd>{executionAnalysis.entryForecast.zoneValid ? formatPrice(executionAnalysis.target, market) : '—'}</dd>
                   </div>
                   <div>
                     <dt>R:R</dt>
@@ -4139,7 +4138,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             <div className="result-head">
               <div>
                 <small>CALCULATED BACKTEST</small>
-                <h1>{current.code} · 구조 돌파 전략</h1>
+                <h1>{current.code} · 기존 고저가 돌파 전략 (강의 전략과 별개)</h1>
                 <p>
                   {backtestData.length.toLocaleString()}개{' '}
                   {timeframeLabels[appliedBacktestTimeframe]} · Lookback{' '}

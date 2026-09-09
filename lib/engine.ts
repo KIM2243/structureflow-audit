@@ -1,3 +1,5 @@
+import { mapMarketStructure, mechanicalInternalPivots, type ConfirmedRange } from './market-structure.ts';
+
 export type Candle = {
   date: string;
   open: number;
@@ -9,6 +11,7 @@ export type Candle = {
 
 export type Pivot = {
   index: number;
+  confirmedAt?: number;
   price: number;
   kind: 'high' | 'low';
   label: string;
@@ -53,6 +56,7 @@ export type LiquidityLevel = {
   price: number;
   kind: 'BUY_SIDE' | 'SELL_SIDE';
   touches: number;
+  status?: 'UNTOUCHED' | 'SWEPT' | 'BROKEN';
 };
 
 export type ForecastReason = {
@@ -67,9 +71,18 @@ export type EntryForecast = {
   trigger: number;
   distancePct: number;
   reasons: ForecastReason[];
+  zoneValid: boolean;
+  locationConfirmed: boolean;
+  zoneTouchTime?: string;
+  reactionTime?: string;
+  reactionConfirmed: boolean;
 };
 
 export type Analysis = {
+  protectedPrice?: number;
+  weakPrice?: number;
+  confirmedRange: ConfirmedRange | null;
+  marketPhase: string;
   score: number;
   bias: 'LONG' | 'SHORT' | 'NEUTRAL';
   atr: number;
@@ -155,9 +168,6 @@ const average = (values: number[]) =>
   values.length
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : 0;
-
-const formatEnginePrice = (value: number) =>
-  value >= 1_000 ? Math.round(value).toLocaleString('en-US') : value.toFixed(2);
 
 export function atr(data: Candle[], period = 14) {
   const ranges = data.map((candle, index) =>
@@ -246,7 +256,7 @@ function detectStructureEvents(
   for (let index = 0; index < data.length; index += 1) {
     while (
       cursor < structure.length &&
-      structure[cursor].index + confirmationWindow < index
+      (structure[cursor].confirmedAt ?? structure[cursor].index + confirmationWindow) < index
     ) {
       const pivot = structure[cursor];
       if (pivot.kind === 'high') latestHigh = pivot;
@@ -325,38 +335,21 @@ function snapshot(data: Candle[]): Snapshot {
       score: 50,
     };
   }
-  const pivotWindow = Math.max(2, Math.min(4, Math.floor(data.length / 20)));
-  const structure = pivots(data, pivotWindow);
-  const events = detectStructureEvents(data, structure, 'SWING', pivotWindow);
+  const mapped = mapMarketStructure(data.slice(0, -1));
+  const structure = mapped.pivots;
+  const events = mapped.events;
   const recent = structure.slice(-4);
-  const high = recent.filter((pivot) => pivot.kind === 'high').at(-1);
-  const low = recent.filter((pivot) => pivot.kind === 'low').at(-1);
   const bullish = recent.filter(
     (pivot) => pivot.label === 'HH' || pivot.label === 'HL',
   ).length;
   const bearish = recent.filter(
     (pivot) => pivot.label === 'LH' || pivot.label === 'LL',
   ).length;
-  const close = data.at(-1)!.close;
   const latestEvent = events.at(-1);
-  const event = latestEvent
-    ? latestEvent.label
-    : high && close > high.price
-      ? 'Swing BOS ↑'
-      : low && close < low.price
-        ? 'Swing BOS ↓'
-        : bullish >= bearish
-          ? 'Internal structure ↑'
-          : 'Internal structure ↓';
+  const event = latestEvent?.label ?? '초기 구조 확인 대기';
 
   return {
-    trend:
-      latestEvent?.direction ??
-      (bullish > bearish
-        ? 'BULLISH'
-        : bearish > bullish
-          ? 'BEARISH'
-          : 'TRANSITION'),
+    trend: mapped.trend,
     sequence: recent.map((pivot) => pivot.label).join(' · ') || '판정 중',
     event,
     score: Math.round(50 + Math.abs(bullish - bearish) * 10),
@@ -469,7 +462,7 @@ function detectZones(data: Candle[]) {
   };
 }
 
-function detectLiquidity(structure: Pivot[], currentAtr: number) {
+function detectLiquidity(structure: Pivot[], currentAtr: number, data: Candle[]) {
   const threshold = Math.max(currentAtr * 0.35, 0.000001);
   const levels: LiquidityLevel[] = [];
 
@@ -491,6 +484,10 @@ function detectLiquidity(structure: Pivot[], currentAtr: number) {
   }
 
   const confirmed = levels.filter((level) => level.touches >= 2);
+  for (const level of levels) {
+    const crossed = data.slice(level.index + 1).find((bar) => level.kind === 'BUY_SIDE' ? bar.high > level.price : bar.low < level.price);
+    level.status = !crossed ? 'UNTOUCHED' : (level.kind === 'BUY_SIDE' ? crossed.close <= level.price : crossed.close >= level.price) ? 'SWEPT' : 'BROKEN';
+  }
   return (confirmed.length ? confirmed : levels)
     .sort(
       (left, right) => right.touches - left.touches || right.index - left.index,
@@ -504,40 +501,29 @@ export function analyze(data: Candle[]): Analysis {
 
   const close = data.at(-1)!.close;
   const currentAtr = atr(data);
-  const swingWindow = 5;
-  const internalWindow = 2;
-  const structure = pivots(data, swingWindow);
-  const internalStructure = pivots(data, internalWindow);
-  const swingEvents = detectStructureEvents(
-    data,
-    structure,
-    'SWING',
-    swingWindow,
-  );
+  // Last bar may still be forming. Only completed predecessors confirm structure.
+  const completed = data.slice(0, -1);
+  const mapped = mapMarketStructure(completed);
+  const structure = mapped.pivots;
+  const internalStructure = mechanicalInternalPivots(completed);
+  const swingEvents = mapped.events;
   const internalEvents = detectStructureEvents(
-    data,
+    completed,
     internalStructure,
     'INTERNAL',
-    internalWindow,
+    1,
   );
   const structureEvents = [...swingEvents, ...internalEvents].sort(
     (left, right) => left.index - right.index,
   );
   const structureState: StructureState = {
-    swingTrend: trendFromEvents(swingEvents),
+    swingTrend: mapped.trend,
     internalTrend: trendFromEvents(internalEvents),
     latestSwingEvent: swingEvents.at(-1),
     latestInternalEvent: internalEvents.at(-1),
   };
   const recent = structure.slice(-8);
-  const bullish = recent.filter(
-    (pivot) => pivot.label === 'HH' || pivot.label === 'HL',
-  ).length;
-  const bearish = recent.filter(
-    (pivot) => pivot.label === 'LH' || pivot.label === 'LL',
-  ).length;
-  const bias =
-    bullish > bearish ? 'LONG' : bearish > bullish ? 'SHORT' : 'NEUTRAL';
+  const bias = mapped.trend === 'BULLISH' ? 'LONG' : mapped.trend === 'BEARISH' ? 'SHORT' : 'NEUTRAL';
   const anchor = recent.find(
     (pivot) => pivot.kind === (bias === 'SHORT' ? 'high' : 'low'),
   );
@@ -593,61 +579,43 @@ export function analyze(data: Candle[]): Analysis {
     .slice(-3)
     .map(({ index }) => profileMin + (index + 0.5) * profileStep);
 
-  const entry: [number, number] =
-    bias === 'SHORT'
-      ? [valueAreaHigh - currentAtr * 0.2, valueAreaHigh + currentAtr * 0.2]
-      : [valueAreaLow - currentAtr * 0.2, valueAreaLow + currentAtr * 0.2];
-  const stop =
-    bias === 'SHORT'
-      ? valueAreaHigh + currentAtr * 1.35
-      : valueAreaLow - currentAtr * 1.35;
-  const targetCandidates = recent
-    .filter((pivot) => pivot.kind === (bias === 'SHORT' ? 'low' : 'high'))
-    .map((pivot) => pivot.price);
-  const target =
-    bias === 'SHORT'
-      ? Math.min(...targetCandidates, close - currentAtr * 3)
-      : Math.max(...targetCandidates, close + currentAtr * 3);
+  // Operational zone: BOS origin candle's wick-to-body, clipped to the
+  // favourable half of the confirmed range. VP never selects an entry.
+  const origin = mapped.protectedLevel ? completed[mapped.protectedLevel.index] : undefined;
+  const range = mapped.range;
+  const entry: [number, number] = origin && range && bias !== 'NEUTRAL'
+    ? bias === 'LONG'
+      ? [origin.low, Math.min(Math.max(origin.open, origin.close), range.equilibrium)]
+      : [Math.max(Math.min(origin.open, origin.close), range.equilibrium), origin.high]
+    : [close, close];
+  const buffer = Math.max(currentAtr * 0.1, close * 0.00001);
+  const stop = origin ? bias === 'SHORT' ? origin.high + buffer : origin.low - buffer : close;
+  const target = mapped.weakLevel?.price ?? close;
+  const zoneValid = !!range && bias !== 'NEUTRAL' && entry[1] > entry[0]
+    && (bias === 'LONG' ? stop < entry[0] && target > entry[1] && close > stop : stop > entry[1] && target < entry[0] && close < stop);
   const risk = Math.abs(average(entry) - stop);
-  const rewardToRisk = risk ? Math.abs(target - average(entry)) / risk : 0;
-  const location =
-    bias === 'LONG'
-      ? close >= valueAreaLow && close <= pointOfControl
-      : bias === 'SHORT'
-        ? close <= valueAreaHigh && close >= pointOfControl
-        : false;
-  const score = Math.max(
-    35,
-    Math.min(
-      94,
-      50 +
-        (bullish - bearish) * (bias === 'SHORT' ? -5 : 5) +
-        (location ? 12 : 0) +
-        (rewardToRisk >= 2 ? 10 : 0),
-    ),
-  );
+  const rewardToRisk = zoneValid && risk ? Math.abs(target - average(entry)) / risk : 0;
+  const location = zoneValid && close >= entry[0] && close <= entry[1];
+  const touchIndex = zoneValid ? completed.findLastIndex((bar, index) =>
+    index >= range!.confirmedAt && bar.low <= entry[1] && bar.high >= entry[0]) : -1;
+  const reaction = internalEvents.at(-1);
+  const reactionConfirmed = !!reaction && reaction.index >= completed.length - 3
+    && reaction.direction === mapped.trend;
+  const reactedAfterTouch = reactionConfirmed && touchIndex >= 0 && reaction!.index > touchIndex;
+  const score = [bias !== 'NEUTRAL', zoneValid, location, reactedAfterTouch, rewardToRisk >= 2].filter(Boolean).length * 20;
   const zones = detectZones(data);
-  const movingAverage20 = average(
-    data.slice(-20).map((candle) => candle.close),
-  );
   const averageVolume20 = average(
     data.slice(-20).map((candle) => candle.volume),
   );
   const volumeRatio = averageVolume20
     ? data.at(-1)!.volume / averageVolume20
     : 0;
-  const trendAligned =
-    bias === 'LONG'
-      ? close >= movingAverage20
-      : bias === 'SHORT'
-        ? close <= movingAverage20
-        : false;
   const entryMidpoint = average(entry);
   const distancePct = close ? ((entryMidpoint - close) / close) * 100 : 0;
   const entryStatus =
-    bias === 'NEUTRAL' || rewardToRisk < 1.5
+    !zoneValid || rewardToRisk < 2
       ? 'AVOID'
-      : location && trendAligned && rewardToRisk >= 2
+      : location && reactedAfterTouch
         ? 'READY'
         : 'WAIT';
   const snapshots = {
@@ -659,6 +627,11 @@ export function analyze(data: Candle[]): Analysis {
   };
 
   return {
+    protectedPrice: mapped.protectedLevel?.price,
+    weakPrice: mapped.weakLevel?.price,
+    confirmedRange: range,
+    marketPhase: mapped.trend === 'TRANSITION' ? '스윙 전환 확인 대기'
+      : structureState.internalTrend === mapped.trend ? '스윙·내부 동행 (PP 후보)' : '스윙 내부 조정',
     score: Math.round(score),
     bias,
     atr: currentAtr,
@@ -685,11 +658,16 @@ export function analyze(data: Candle[]): Analysis {
     target,
     rr: rewardToRisk,
     snapshots,
-    confidence: Math.min(95, 55 + Math.round(data.length / 8)),
+    confidence: score,
     orderBlocks: zones.orderBlocks,
     fairValueGaps: zones.fairValueGaps,
-    liquidity: detectLiquidity(structure, currentAtr),
+    liquidity: detectLiquidity(internalStructure, currentAtr, completed),
     entryForecast: {
+      zoneValid,
+      locationConfirmed: location,
+      zoneTouchTime: touchIndex >= 0 ? completed[touchIndex].date : undefined,
+      reactionTime: reactionConfirmed ? completed[reaction!.index].date : undefined,
+      reactionConfirmed,
       status: entryStatus,
       side: bias,
       trigger: entryMidpoint,
@@ -700,20 +678,20 @@ export function analyze(data: Candle[]): Analysis {
           state: bias === 'NEUTRAL' ? 'WAIT' : 'PASS',
           detail:
             bias === 'NEUTRAL'
-              ? '상승·하락 피벗 우위가 아직 없습니다.'
-              : `${bias} 구조 우위 · 상승 ${bullish} / 하락 ${bearish}`,
+              ? '보호 수준 이탈 또는 초기 구간: 후속 BOS 확인 전 대기합니다.'
+              : `${bias} · 종가 BOS로 확인한 스윙 방향`,
         },
         {
           label: '진입 위치',
           state: location ? 'PASS' : 'WAIT',
           detail: location
-            ? '현재가가 Value Area의 유리한 진입 측에 있습니다.'
-            : `예측 구간까지 현재가 대비 ${distancePct >= 0 ? '+' : ''}${distancePct.toFixed(2)}% 이동이 필요합니다.`,
+            ? '현재가가 BOS 기원 영역과 유리한 반범위 안에 있습니다.'
+            : !zoneValid ? '확정된 구조 영역이 없어 가격 계획을 보류합니다.' : `구조 영역까지 ${distancePct.toFixed(2)}% · 추격하지 않고 대기`,
         },
         {
-          label: '20봉 추세',
-          state: trendAligned ? 'PASS' : 'WAIT',
-          detail: `${formatEnginePrice(close)} / 20MA ${formatEnginePrice(movingAverage20)} · ${trendAligned ? '방향 일치' : '확인 대기'}`,
+          label: '구간 도달 후 구조 반응',
+          state: reactedAfterTouch ? 'PASS' : 'WAIT',
+          detail: reactedAfterTouch ? '구간 접촉 뒤 완료 봉의 내부 구조 돌파 확인' : '구간 접촉 이후의 새로운 내부 CHoCH/BOS를 기다립니다.',
         },
         {
           label: '거래량',
