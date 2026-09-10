@@ -24,6 +24,7 @@ export type KiwoomChart = {
   source: string;
   candles: KiwoomCandle[];
   timeframes: {
+    '1m'?: KiwoomCandle[];
     '15m': KiwoomCandle[];
     '1H': KiwoomCandle[];
     '4H': KiwoomCandle[];
@@ -869,7 +870,7 @@ function lastCandles(candles: KiwoomCandle[], count = CHART_CANDLE_LIMIT) {
 
 async function loadDomesticChart(
   symbol: string,
-  scope: '5' | '15' | '60' | '1D',
+  scope: '1' | '5' | '15' | '60' | '1D',
   target: number,
   config: KiwoomConfig,
   signal?: AbortSignal,
@@ -899,7 +900,7 @@ async function loadDomesticChart(
 
 async function loadUsChart(
   request: KiwoomQuoteRequest,
-  scope: '5' | '15' | '60' | '1D',
+  scope: '1' | '5' | '15' | '60' | '1D',
   target: number,
   config: KiwoomConfig,
   signal?: AbortSignal,
@@ -928,9 +929,10 @@ async function loadUsChart(
 export async function getMarketChart(
   request: KiwoomQuoteRequest,
   signal?: AbortSignal,
+  includeOneMinute = false,
 ): Promise<KiwoomChart> {
   const config = readConfig();
-  const load = (scope: '5' | '15' | '60' | '1D', target: number) =>
+  const load = (scope: '1' | '5' | '15' | '60' | '1D', target: number) =>
     request.market === 'KR'
       ? loadDomesticChart(request.symbol, scope, target, config, signal)
       : loadUsChart(request, scope, target, config, signal);
@@ -943,8 +945,9 @@ export async function getMarketChart(
     { scope: '15' as const, target: 440 },
     { scope: '60' as const, target: 1_800 },
     { scope: '1D' as const, target: 440 },
+    ...(includeOneMinute ? [{ scope: '1' as const, target: 440 }] : []),
   ];
-  const [fiveMinute, fifteenMinute, hourlyForAggregation, daily] =
+  const [fiveMinute, fifteenMinute, hourlyForAggregation, daily, oneMinute] =
     await Promise.all(
       chartRequests.map(async ({ scope, target }, index) => {
         if (index > 0) {
@@ -971,6 +974,7 @@ export async function getMarketChart(
         : 'Kiwoom REST API',
     candles: lastCandles(fiveMinute),
     timeframes: {
+      ...(oneMinute ? { '1m': lastCandles(oneMinute) } : {}),
       '15m': lastCandles(fifteenMinute),
       '1H': lastCandles(hourlyForAggregation),
       '4H': lastCandles(toFourHourCandles(hourlyForAggregation, request.market)),

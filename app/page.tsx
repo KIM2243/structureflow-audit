@@ -72,6 +72,7 @@ import {
   type MultiTimeframeEntryStep,
 } from '@/lib/multi-timeframe';
 import { mapMarketStructure } from '@/lib/market-structure';
+import { AutoPaperPanel } from '@/components/auto-paper-panel';
 
 type Market = 'US' | 'KR';
 type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
@@ -2338,6 +2339,7 @@ function PaperTrading({
 
   return (
     <section className="paper-layout">
+      <AutoPaperPanel market={market} symbol={current.code} exchange={current.exchange} name={current.name} active={active}/>
       <section className="paper-workspace-bar" aria-label="모의투자 종목 선택">
         <div className="segmented" aria-label="모의투자 시장 선택">
           <button className={market === 'US' ? 'on' : ''} onClick={() => selectMarket('US')}>🇺🇸 미국</button>

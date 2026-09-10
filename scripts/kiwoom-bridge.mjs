@@ -102,7 +102,7 @@ async function market(url, response) {
       market,
       symbol,
       ...(market === 'US' ? { exchange } : {}),
-    });
+    }, undefined, url.searchParams.get('auto') === '1');
     json(response, 200, { ...chart, fetchedAt: new Date().toISOString() });
   } catch (error) {
     const details = publicError(error);

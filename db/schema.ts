@@ -36,3 +36,22 @@ export const watchlistItems = sqliteTable('watchlist_items', {
   uniqueIndex('idx_watchlist_user_market_ticker').on(table.userId, table.market, table.ticker),
   index('idx_watchlist_user_market_position').on(table.userId, table.market, table.position),
 ]);
+
+export const autoPaperRuns = sqliteTable('auto_paper_runs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  instrument: text('instrument').notNull(),
+  config: text('config').notNull(),
+  state: text('state').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  hasPosition: integer('has_position').notNull().default(0),
+  closeRequested: integer('close_requested').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
+  checkedAt: integer('checked_at').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+}, table => [uniqueIndex('idx_auto_user_instrument').on(table.userId,table.instrument),index('idx_auto_due').on(table.checkedAt)]);
+
+export const autoPaperRuntime = sqliteTable('auto_paper_runtime', {
+  id: text('id').primaryKey(),
+  heartbeatAt: integer('heartbeat_at').notNull(),
+});

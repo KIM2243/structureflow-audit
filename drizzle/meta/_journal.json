@@ -15,6 +15,20 @@
       "when": 1788763841409,
       "tag": "0001_mighty_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789035362602,
+      "tag": "0002_keen_blindfold",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789035404400,
+      "tag": "0003_same_doctor_doom",
+      "breakpoints": true
     }
   ]
 }
