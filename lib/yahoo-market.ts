@@ -86,11 +86,11 @@ export async function getYahooCurrentPrice(
 
 export async function getYahooMarketChart(market:'US'|'KR',symbol:string){
   const timeout=AbortSignal.timeout(15_000);
-  const loadSeries=(feed:string)=>Promise.all([load(feed,'5m','5d',timeout),load(feed,'15m','1mo',timeout),load(feed,'60m','3mo',timeout),load(feed,'1d','1y',timeout)]);
-  const [five,fifteen,hour,daily]=market==='KR'
+  const loadSeries=(feed:string)=>Promise.all([load(feed,'5m','5d',timeout),load(feed,'15m','1mo',timeout),load(feed,'60m','3mo',timeout),load(feed,'1d','1y',timeout),load(feed,'1m','5d',timeout).catch(()=>null)]);
+  const [five,fifteen,hour,daily,one]=market==='KR'
     ? await loadSeries(`${symbol}.KS`).catch(()=>loadSeries(`${symbol}.KQ`))
     : await loadSeries(symbol);
   const fiveCandles=candles(five),fifteenCandles=candles(fifteen),hourCandles=candles(hour),dailyCandles=candles(daily);if(fiveCandles.length<40)throw new Error('보조 시세의 분석 데이터가 부족합니다.');
   const meta=five.chart!.result![0].meta||{};
-  return {symbol,name:metaText(meta.longName,metaText(meta.shortName,symbol)),exchange:metaText(meta.exchangeName),currency:market==='KR'?'KRW':'USD',price:Number(meta.regularMarketPrice)||fiveCandles.at(-1)!.close,source:'Yahoo Finance 보조 시세',candles:fiveCandles,timeframes:{'15m':fifteenCandles,'1H':hourCandles,'4H':fourHour(hourCandles),'1D':dailyCandles},fetchedAt:new Date().toISOString()};
+  return {symbol,name:metaText(meta.longName,metaText(meta.shortName,symbol)),exchange:metaText(meta.exchangeName),currency:market==='KR'?'KRW':'USD',price:Number(meta.regularMarketPrice)||fiveCandles.at(-1)!.close,source:'Yahoo Finance 보조 시세',candles:fiveCandles,timeframes:{'1m':one?candles(one):[],'15m':fifteenCandles,'1H':hourCandles,'4H':fourHour(hourCandles),'1D':dailyCandles},fetchedAt:new Date().toISOString()};
 }

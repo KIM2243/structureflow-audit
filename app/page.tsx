@@ -1,5 +1,6 @@
 'use client';
 
+import { qualifiedZone, closedBars } from '@/lib/auto-paper';
 import {
   useCallback,
   useEffect,
@@ -82,8 +83,9 @@ type AdminUser = AuthUser & {
   lastLoginAt: number | null;
 };
 type UsExchange = 'NA' | 'ND' | 'NY';
-type Timeframe = '5m' | '15m' | '1H' | '4H' | '1D';
+type Timeframe = '1m' | '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
+  | 'supplyDemand'
   | 'structure'
   | 'choch'
   | 'swingLabels'
@@ -281,6 +283,7 @@ const LIVE_QUOTE_STALE_MS = 15_000;
 const MARKET_DATA_CACHE_TTL_MS = 30_000;
 
 const timeframeSizes: Record<Timeframe, number> = {
+  '1m': 0.2,
   '5m': 1,
   '15m': 3,
   '1H': 12,
@@ -348,10 +351,11 @@ function buildTimeframeData(
     : higherTimeframeData['1D']?.length
       ? higherTimeframeData['1D']
       : resampleBySession(data, timeframeSizes['1D']);
-  return { '5m': data, '15m': fifteenMinute, '1H': hourly, '4H': fourHour, '1D': daily };
+  return { '1m': higherTimeframeData['1m'] || [], '5m': data, '15m': fifteenMinute, '1H': hourly, '4H': fourHour, '1D': daily };
 }
 
 const timeframeLabels: Record<Timeframe, string> = {
+  '1m': '1분봉',
   '5m': '5분봉',
   '15m': '15분봉',
   '1H': '1시간봉',
@@ -360,6 +364,7 @@ const timeframeLabels: Record<Timeframe, string> = {
 };
 
 const timeframeButtonLabels: Record<Timeframe, string> = {
+  '1m': '1분',
   '5m': '5분',
   '15m': '15분',
   '1H': '1시간',
@@ -410,6 +415,13 @@ type EntryLesson = {
 };
 
 const entryLessons: Record<EntryTimeframe, EntryLesson> = {
+  '1m': {
+    role: '15분 기원 구역 안에서 진입 가격을 정제하는 실행 시간대',
+    principle: '4시간 구역 접촉 → 이후 15분 전환·재접촉 → 이후 1분 종가 전환·재접촉 순서입니다. 원본 1분봉이 없으면 대기하며 5분봉을 나누어 만들지 않습니다.',
+    checks: ['1분 구역이 15분 구역 안에 포함되는지 확인', '1시간 내부 방향 동행(PP)·구역 등급·비용과 부분청산을 반영한 순 2R 확인'],
+    next: '롱은 수요 구역 아래 손절, 숏은 공급 구역 위 손절. 1R에 절반, 잔여는 4시간 목표까지 관리합니다.',
+    invalidation: '1분 기원 구역 종가 이탈·반대 전환·30분 대기 만료 시 취소합니다.',
+  },
   '1D': {
     role: '큰 그림과 주요 가치 영역을 정하는 배경 시간대',
     principle:
@@ -435,44 +447,38 @@ const entryLessons: Record<EntryTimeframe, EntryLesson> = {
       '4시간 보호 스윙이 몸통 종가로 깨지면 기존 스윙 방향은 더 이상 우선 시나리오가 아닙니다.',
   },
   '1H': {
-    role: '4시간과 15분 사이의 구조 발전을 확인하는 보조 시간대',
+    role: '선택한 PP 실험의 내부 방향 확인 시간대',
     principle:
-      '분석 마비를 피하기 위해 핵심 진입 시간대는 4H·15m·5m로 제한합니다. 1시간봉은 필수 게이트가 아니라 4시간 스윙이 15분 구조로 전개되는 과정을 보강하는 중간 확인으로 사용합니다.',
+      '핵심 흐름은 4H·15m·1m입니다. 이번 PP 실험에서는 1시간 내부 구조가 진입 방향과 같을 때만 실행합니다. 이는 선택한 보수적 실험 조건입니다.',
     checks: [
       '4시간 방향과 같은 구조 이탈 또는 CHoCH가 나타나는지 확인',
       '1시간 신호 하나 때문에 4시간·15분의 명확한 이야기를 뒤집지 않기',
     ],
-    next: '1시간이 애매하면 결론을 늘리지 말고 15분의 실제 구조 정렬을 기다립니다.',
+    next: '1시간 내부 방향이 다르거나 미확정이면 PP 진입을 보류합니다.',
     invalidation:
       '1시간 반대 구조가 지속되고 4시간 보호 스윙까지 위협하면 상위 편향을 재평가합니다.',
   },
   '15m': {
     role: '현재 구간이 프로트렌드인지 풀백인지 판단하는 방향 시간대',
     principle:
-      '15분봉은 4시간 되돌림의 시작과 종료를 먼저 보여주는 방향 시간대입니다. 높은 시간대 관심 구역에서 15분 구조가 4시간 스윙과 같은 방향으로 정렬될 때 진입 후보의 확률이 높아집니다.',
+      '15분봉은 4시간 되돌림의 시작과 종료를 먼저 보여주는 방향 시간대입니다. 높은 시간대 관심 구역에서 15분 구조가 4시간 스윙과 같은 방향으로 정렬될 때 진입 후보로 검토합니다.',
     checks: [
       '높은 시간대 관심 구역에서 CHoCH·구조 이탈이 발생했는지 확인',
       '강세는 내부 디스카운트, 약세는 내부 프리미엄에서 기회 찾기',
     ],
-    next: '15분 방향이 정렬되면 5분봉에서 같은 방향의 실행 트리거를 확인합니다.',
+    next: '15분 기원 구역 재접촉 이후 1분봉의 전환과 정제 구역 재접촉을 확인합니다.',
     invalidation:
       '15분이 높은 시간대 방향으로 정렬되지 않고 반대 구조를 계속 만들면 진입하지 않고 편향 변경 가능성을 열어 둡니다.',
   },
   '5m': {
-    role: '캔들 패턴과 정밀한 거래 실행을 담당하는 시간대',
-    principle:
-      '낮은 시간대는 높은 시간대에서 일어날 움직임을 먼저 보여줍니다. 5분봉은 예측용이 아니라 상위·중간 구조가 정렬된 뒤 실제 캔들 패턴과 트리거로 진입 가격을 좁히는 실행 도구입니다.',
-    checks: [
-      '4시간·15분 방향과 5분 구조가 모두 같은 방향인지 확인',
-      '관심 구역 안에서 몸통 종가 기준 구조 이탈과 진입 트리거 확인',
-    ],
-    next: '트리거가 없으면 가격을 추격하지 않고 관심 구역의 다음 확인을 기다립니다.',
-    invalidation:
-      '5분 구조가 반대로 전환되거나 계산된 손절·무효화 가격을 이탈하면 실행 시나리오를 폐기합니다.',
-  },
-};
+    role: '15분과 1분 사이의 보조 관찰 시간대',
+    principle: '5분봉은 움직임을 보조 확인하는 차트입니다. 자동 실험의 필수 1분 종가 전환·재접촉을 대신하지 않습니다.',
+    checks: ['4시간·15분 구조의 전개 확인', '실제 진입 조건은 원본 1분봉에서 별도 확인'],
+    next: '1분봉으로 이동하여 정제 구역과 무효화 가격을 확인합니다.',
+    invalidation: '5분 신호만으로 자동 진입하지 않습니다.',
+  },};
 
-const backtestTimeframes: Timeframe[] = ['5m', '15m', '1H', '4H', '1D'];
+const backtestTimeframes: Timeframe[] = ['1m', '5m', '15m', '1H', '4H', '1D'];
 
 const DEFAULT_PREFERENCES: Preferences = {
   capital: 10_000,
@@ -1036,6 +1042,8 @@ function PriceChart({
     setDragging(false);
   };
 
+  if (data.length < 2) return <div className="chart-data-wait" role="status"><strong>{timeframe==='1m'?'원본 1분봉을 기다리고 있습니다':'차트 데이터를 기다리고 있습니다'}</strong><p>{timeframe==='1m'?'1분봉이 제공되면 표시합니다. 5분봉을 분할하거나 대신 사용해 진입하지 않습니다.':'해당 시간대 데이터가 도착하면 구조를 표시합니다.'}</p></div>;
+
   const width = 900;
   const height = 430;
   const padding = 28;
@@ -1057,7 +1065,7 @@ function PriceChart({
     (level) => level.index >= offset && level.index < endIndex,
   );
   const showForecast =
-    layers.forecast && isViewingLatest && timeframe === '15m' && analysis.entryForecast.zoneValid;
+    layers.forecast && isViewingLatest && timeframe === '1m' && analysis.entryForecast.zoneValid;
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
   const latestVisibleCandle = displayed.at(-1)!;
@@ -1212,6 +1220,10 @@ function PriceChart({
       event.price <= maximum,
   );
   const dealingRange = isViewingLatest ? analysis.confirmedRange : mapMarketStructure(data.slice(0, Math.max(0, endIndex - 1))).range;
+  const gradingBars = closedBars(data.slice(0, endIndex), timeframeSizes[timeframe]*5, Date.now());
+  const supplyDemand = layers.supplyDemand ? qualifiedZone(gradingBars, timeframeSizes[timeframe]*5) : undefined;
+  const zoneFirstBar=supplyDemand?data.findIndex(b=>Date.parse(b.date)>=supplyDemand.zone.at):-1;
+  const zoneLeft=x(Math.max(0,(zoneFirstBar<0?endIndex-1:zoneFirstBar)-offset));
   const equilibriumY = dealingRange
     ? clampedY(dealingRange.equilibrium)
     : null;
@@ -1219,10 +1231,14 @@ function PriceChart({
   const rangeLowY = dealingRange ? clampedY(dealingRange.low) : null;
 
   return (
+    <>
+      {supplyDemand && <details className="chart-zone-details"><summary>{supplyDemand.direction==='LONG'?'수요':'공급'} 구역 {supplyDemand.zone.quality?.grade}등급 · 평가 근거</summary><p>{supplyDemand.zone.quality?.reasons.join(' · ')}</p><p>A ≥ 4점 · B 3점 · C ≤ 2점. 관측한 구조를 분류하는 실험 점수이며 승률이 아닙니다. 자동 진입은 H4·M15·M1의 A/B등급만 사용합니다.</p></details>}
     <div className="chart-wrap">
       <div className="chart-badges">
         <span>{timeframe}</span>
         <span className="soft">OHLCV · {displayed.length}봉</span>
+        {timeframe==='1m' && data.length<20 && <span role="status">원본 1분봉 부족 · 진입 대기 (5분봉 대체 없음)</span>}
+        {supplyDemand && <span className="zone-grade" title={supplyDemand.zone.quality?.reasons.join(' · ')}>{supplyDemand.direction==='LONG'?'수요':'공급'} {supplyDemand.zone.quality?.grade} · {supplyDemand.zone.quality?.score}/{supplyDemand.zone.quality?.maximum}</span>}
         <span className="soft">
           {isViewingLatest ? '최신 구간' : `${offset + 1}–${endIndex}봉`}
         </span>
@@ -1264,9 +1280,9 @@ function PriceChart({
           >
             {showForecast
               ? `진입 예측 · ${analysis.entryForecast.status}`
-              : timeframe === '15m'
+              : timeframe === '1m'
                 ? analysis.entryForecast.zoneValid ? '진입 예측 · 최신 구간에서 표시' : '진입 계획 · 구조 영역 확정 대기'
-                : '진입 예측 · 15m 차트에서 표시'}
+                : '진입 후보 · 1m 차트에서 표시'}
           </span>
         )}
       </div>
@@ -1332,6 +1348,11 @@ function PriceChart({
             height={chartBottom - padding}
             className="price-axis-background"
           />
+          {supplyDemand && supplyDemand.zone.high>=minimum && supplyDemand.zone.low<=maximum && <g aria-label="확정 수요 공급 구역과 실험 등급">
+            <title>{supplyDemand.zone.quality?.reasons.join(' · ')} · A≥4 / B=3 / C≤2 · 승률 아님</title>
+            <rect x={zoneLeft} y={clampedY(supplyDemand.zone.high)} width={Math.max(1,plotRight-zoneLeft)} height={Math.max(2,clampedY(supplyDemand.zone.low)-clampedY(supplyDemand.zone.high))} fill={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} fillOpacity="0.13" stroke={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} strokeDasharray="6 3"/>
+            <text x={Math.min(zoneLeft+8,plotRight-120)} y={Math.max(padding+16,clampedY(supplyDemand.zone.high)+16)} fill={supplyDemand.direction==='LONG'?'#60dfbd':'#ffa4b3'} fontSize="14">{supplyDemand.direction==='LONG'?'수요':'공급'} · {supplyDemand.zone.quality?.grade}등급</text>
+          </g>}
           {layers.premiumDiscount &&
             dealingRange &&
             equilibriumY !== null &&
@@ -1796,6 +1817,7 @@ function PriceChart({
         </g>
       </svg>
     </div>
+    </>
   );
 }
 
@@ -2115,6 +2137,7 @@ function PaperTrading({
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [quote, setQuote] = useState<LiveQuote | null>(null);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    supplyDemand: true,
     structure: true,
     choch: true,
     swingLabels: true,
@@ -2377,7 +2400,7 @@ function PaperTrading({
             <strong>{current.code} · {current.name}</strong>
           </div>
           <div className="paper-timeframes" aria-label="모의투자 차트 시간대">
-            {(['1D', '4H', '1H', '15m', '5m'] as Timeframe[]).map((item) => (
+            {(['1D', '4H', '1H', '15m', '1m', '5m'] as Timeframe[]).map((item) => (
               <button
                 type="button"
                 key={item}
@@ -2392,9 +2415,10 @@ function PaperTrading({
         </div>
         <div className="paper-layer-toggles" aria-label="모의투자 차트 레이어">
           {([
-            ['structure', '스윙구조'], ['choch', 'CHOCH'], ['swingLabels', 'HH·HL·LH·LL'],
-            ['premiumDiscount', 'Premium/Discount'], ['internalStructure', '내부구조'],
-            ['volume', '거래량'], ['volumeProfile', 'VP'], ['forecast', '진입예측'],
+            ['structure', '1 스윙구조'], ['swingLabels', 'HH·HL·LH·LL'],
+            ['premiumDiscount', '2 Premium/Discount'], ['supplyDemand', '3 수요·공급 등급'], ['liquidity', '4 유동성'],
+            ['internalStructure', '5 내부구조'], ['choch', '6 CHoCH'], ['forecast', '7 진입·손절·목표'],
+            ['orderflow', '보조 OB/FVG'], ['volume', '보조 거래량'], ['volumeProfile', '보조 VP'],
           ] as Array<[LayerKey, string]>).map(([key, label]) => (
             <button
               type="button"
@@ -2537,7 +2561,7 @@ function GuidePage() {
     ['4H', '셋업 방향', '일봉 안에서 실제로 거래할 스윙 방향을 결정'],
     ['1H', '구조 확인', '4시간 방향과 보조 구조가 맞는지 확인'],
     ['15m', '진입 계획', '진입 구간·손절·목표가를 하나로 계산'],
-    ['5m', '체결 트리거', '15분 구간 안에서 실제 반응이 나올 때만 실행'],
+    ['1m', '진입 정제', '15분 재접촉 이후 전환·재접촉과 PP를 확인'],
   ] as const;
   const glossary = [
     ['HH / HL', '이전보다 높은 고점 / 높은 저점', '상승 구조가 이어지는 단서'],
@@ -2553,7 +2577,7 @@ function GuidePage() {
       <header className="guide-hero">
         <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE</div>
         <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
-        <p>상위 시간대에서 방향을 정하고, 15분봉에서 가격 계획을 세운 뒤, 5분봉 반응으로 실행합니다.</p>
+        <p>4시간 구역 접촉에서 출발해 15분과 1분의 전환·재접촉을 차례대로 확인합니다.</p>
         <p>강의 주요 장면에서 확인한 원칙을 보수적으로 구현했습니다. 전체 강의의 모든 예외를 재현한 인증된 전략은 아니며, 아래의 시스템 규칙은 강의 원문과 구분합니다.</p>
         <div className="guide-tabs" role="tablist" aria-label="트레이딩 가이드 분류">
           {guideTabs.map(([id, label, description]) => (
@@ -2584,7 +2608,7 @@ function GuidePage() {
             </article>
           ))}
         </div>
-        <div className="guide-memory-rule"><strong>한 줄 기억법</strong><span>1D·4H는 방향 → 1H는 확인 → 15m는 가격 → 5m는 실행</span></div>
+        <div className="guide-memory-rule"><strong>한 줄 기억법</strong><span>1D·4H는 방향 → 1H는 확인 → 15m는 가격 → 1m는 실행</span></div>
       </section>
 
       <section id="guide-check" className="guide-section">
@@ -2594,7 +2618,7 @@ function GuidePage() {
             '1D와 4H 중 실제로 따를 방향을 말할 수 있는가?',
             '현재 스윙이 BOS로 확정된 구조인지 확인했는가?',
             '15m 진입 구간과 무효화 가격을 확인했는가?',
-            '5m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
+            '1m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
             '손절 기준으로 계산된 수량이 감당 가능한가?',
           ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
         </div>
@@ -2634,10 +2658,10 @@ function GuidePage() {
         <aside className="guide-screen-map">
           <h3>화면에서 무엇을 믿어야 하나요?</h3>
           <dl>
-            <div><dt>상단 진입·손절·목표</dt><dd><b>15m 고정</b><span>실제 실행 계획</span></dd></div>
+            <div><dt>상단 진입·손절·목표</dt><dd><b>1m 정제</b><span>실제 실행 계획</span></dd></div>
             <div><dt>1D·4H·1H 차트</dt><dd><b>방향 참고</b><span>진입 가격선 없음</span></dd></div>
-            <div><dt>15m 차트</dt><dd><b>가격 계획</b><span>진입·무효화·목표 표시</span></dd></div>
-            <div><dt>5m 차트</dt><dd><b>체결 확인</b><span>구조 반응과 트리거 확인</span></dd></div>
+            <div><dt>11m 차트</dt><dd><b>가격 계획</b><span>진입·무효화·목표 표시</span></dd></div>
+            <div><dt>1m 차트</dt><dd><b>체결 확인</b><span>구조 반응과 트리거 확인</span></dd></div>
           </dl>
         </aside>
       </section>
@@ -2647,13 +2671,13 @@ function GuidePage() {
         <div className="guide-entry-flow">
           <article><span>1</span><strong>방향 정렬</strong><p>4H 방향과 1H·15m 구조가 충돌하지 않는지 확인</p></article>
           <article><span>2</span><strong>15m 구간 도달</strong><p>계산된 진입 영역에 가격이 들어오는지 대기</p></article>
-          <article><span>3</span><strong>5m 반응 확인</strong><p>CHOCH/BOS와 거래량 반응으로 실제 방어 여부 확인</p></article>
+          <article><span>3</span><strong>1m 전환·재접촉 확인</strong><p>CHOCH/BOS와 거래량 반응으로 실제 방어 여부 확인</p></article>
           <article><span>4</span><strong>손절 먼저 확정</strong><p>무효화 가격과 허용 위험에 맞춰 수량 계산</p></article>
         </div>
         <div className="guide-note"><CircleAlert size={18} /><p><strong>눌림이 오지 않으면 거래하지 않는 전략입니다.</strong> 강한 추세의 돌파·재시험 진입은 별도의 시나리오로 구분해야 하며, 현재 기본 진입 구간과 섞지 않습니다.</p></div>
         <div className="guide-concept-stack">
-          <article><b>강의 원칙 → 시스템의 구체적인 규칙</b><p>15분 BOS 기원 봉의 꼬리~몸통을 후보 영역으로 잡고 유리한 반범위로 제한합니다. 손절 완충 0.1 ATR, 최소 2R, 최근 완료 3봉 안의 구조 반응은 시스템 선택값이며 강의의 정확한 수치가 아닙니다.</p></article>
-          <article><b>4H → 15m → 5m</b><p>4시간 스윙이 방향, 15분 영역이 가격, 영역 접촉 이후 5분 내부 구조 돌파가 트리거입니다. 1D·1H는 참고입니다. 강의의 1분 실행 예시와 달리 이 사이트는 5분 데이터를 사용하므로 같은 타이밍이나 성과를 보장하지 않습니다.</p></article>
+          <article><b>강의 원칙 → 시스템의 구체적인 규칙</b><p>구역 경계는 기원 봉의 꼬리~몸통, H4는 유리한 반범위로 제한합니다. 자동 v2의 손절 완충 0.1%, 위험 0.5%, 1R 50% 청산, A/B등급, 부분청산 반영 최소 순 2R은 실험 설정입니다. 차트의 단일 시간대 참고 분석과 자동 체결 기록을 구분합니다.</p></article>
+          <article><b>4H → 15m → 1m</b><p>4시간 수요·공급 접촉, 이후 15분 전환·재접촉, 이후 1분 전환·재접촉 순서입니다. PP 실험은 1시간 내부 방향도 확인합니다. 1분 원본이 없으면 대기합니다.</p></article>
           <article><b>숫자를 읽는 법</b><p>목표는 반대편 약한 스윙 극점 후보입니다. 영역이 없거나 2R 미만이면 보류합니다. 조건 충족 점수는 체크리스트 집계이지 승률이 아닙니다. 구간 안의 가격과 접촉 이후 새 구조 반응까지 확인해야 최종 준비 상태입니다.</p></article>
         </div>
       </section>
@@ -2667,8 +2691,8 @@ function GuidePage() {
           {[
             ['1', '관심종목 등록', '미국·한국 탭을 먼저 고른 뒤 빈 카드의 ‘종목을 추가해 주세요’를 누릅니다. 이름이나 종목코드로 검색해 국가별 최대 3개를 저장하세요.'],
             ['2', '분석 데이터 불러오기', 'LIVE WATCH 카드에서 종목을 고르고 데이터 불러오기를 누릅니다. 다시 방문하면 마지막 차트를 복원하며, 관심종목 가격은 5초마다 갱신됩니다.'],
-            ['3', '상단 결론 확인', '점수와 LONG·SHORT·관망 상태를 먼저 읽고, 예측 진입 구간·손절·목표는 15분봉 실행 계획으로 해석합니다.'],
-            ['4', '시간대 순서대로 검증', '왼쪽 패널을 1D → 4H → 1H → 15m → 5m 순서로 누릅니다. 상위 봉은 방향, 15분봉은 가격, 5분봉은 체결 트리거입니다.'],
+            ['3', '상단 결론 확인', '점수와 LONG·SHORT·관망 상태를 먼저 읽고, 상단 가격은 1분 분석의 참고 계획입니다. 자동 실험의 확정 손절·목표는 모의투자 패널에서 확인합니다.'],
+            ['4', '시간대 순서대로 검증', '왼쪽 패널을 1D → 4H → 1H → 15m → 1m 순서로 누릅니다. 상위 봉은 방향, 15분봉은 가격, 1분봉은 진입 정제입니다. 5분봉은 보조입니다.'],
             ['5', '차트 근거 켜고 끄기', '차트 위의 스윙구조, CHOCH, HH·HL, Premium/Discount, 내부구조, 거래량, VP, OB/FVG, 유동성 버튼으로 필요한 근거만 남깁니다.'],
             ['6', '실행 계획으로 최종 확인', '오른쪽 실행 계획에서 각 시간대가 충족·대기·차단 중인지 확인합니다. 가격이 구간에 닿았다는 이유만으로 주문하지 않습니다.'],
           ].map(([step, title, detail]) => (
@@ -2685,7 +2709,7 @@ function GuidePage() {
             ['Internal Structure', '내부구조', '큰 스윙인가, 아직 범위 안의 작은 움직임인가?'],
             ['Premium / Discount', 'Premium/Discount', '비싼 곳을 추격하는가, 유리한 영역의 반응을 기다리는가?'],
             ['VAH / POC / VAL', 'VP', '현재 가격은 Value Area의 위·안·아래 중 어디인가?'],
-            ['다중 시간대 분석', '왼쪽 시간대 구조 · 실행 계획', '1D 방향부터 5m 트리거까지 서로 충돌하지 않는가?'],
+            ['다중 시간대 분석', '왼쪽 시간대 구조 · 실행 계획', '1D 방향부터 1m 트리거까지 서로 충돌하지 않는가?'],
           ].map(([concept, location, question]) => (
             <div key={concept} className="guide-map-row" role="row"><strong role="cell">{concept}</strong><span role="cell">{location}</span><p role="cell">{question}</p></div>
           ))}
@@ -2698,7 +2722,7 @@ function GuidePage() {
               <li><b>1D·4H</b><span>상승 구조와 거래할 방향을 확인</span></li>
               <li><b>1H</b><span>상위 방향을 거스르는 구조 변화가 없는지 확인</span></li>
               <li><b>15m</b><span>BOS 기원 영역·Discount와 무효화 가격 확인 (VAL은 보조)</span></li>
-              <li><b>5m</b><span>상승 CHoCH/BOS와 거래량 반응이 나온 뒤 실행</span></li>
+              <li><b>1m</b><span>상승 CHoCH/BOS와 거래량 반응이 나온 뒤 실행</span></li>
               <li><b>모의투자</b><span>같은 종목을 불러와 손절 기준 수량으로 먼저 연습</span></li>
             </ol>
           </article>
@@ -2715,7 +2739,7 @@ function GuidePage() {
             <li>모든 지그재그를 유효 스윙으로 세지 않습니다.</li>
             <li>CHoCH 하나만 보고 바로 진입하지 않습니다.</li>
             <li>1D·4H의 구조 기준선을 실제 진입 가격으로 착각하지 않습니다.</li>
-            <li>15분 진입 구간 도달과 5분 체결 트리거를 구분합니다.</li>
+            <li>15분 기원 구역 재접촉과 이후 1분 전환·재접촉을 구분합니다.</li>
             <li>백테스트 결과를 다음 거래의 확정 예측으로 사용하지 않습니다.</li>
           </ul>
         </div>
@@ -2742,6 +2766,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1D');
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    supplyDemand: true,
     structure: true,
     choch: true,
     swingLabels: true,
@@ -2911,6 +2936,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   );
   const entryAnalyses = useMemo(
     () => ({
+      '1m': analyze(timeframeData['1m']),
       '5m': analyze(timeframeData['5m']),
       '15m': analyze(timeframeData['15m']),
       '1H': analyze(timeframeData['1H']),
@@ -2922,10 +2948,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       evaluateMultiTimeframeEntry({
         snapshots: timeframeSnapshots,
         analyses: entryAnalyses,
+        candles: timeframeData,
+        capital: market==='KR'?10000000:10000,
       }),
-    [entryAnalyses, timeframeSnapshots],
+    [entryAnalyses, timeframeSnapshots, timeframeData, market, liveUpdatedAt],
   );
-  const executionAnalysis = entryAnalyses['15m'];
+  const executionAnalysis = entryAnalyses['1m'];
   const selectedDirection = directionLabel(executionAnalysis.bias);
   const timeframeContext = multiTimeframeContext(
     timeframeSnapshots['1D'].trend,
@@ -2966,20 +2994,20 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const positionNotional = positionSize * entryMidpoint;
 
   const loadMarketData = useCallback(
-    async (item: SymbolItem | WatchedSymbol) => {
+    async (item: SymbolItem | WatchedSymbol, refresh=false) => {
       const itemMarket = 'market' in item ? item.market : market;
       const exchange = itemMarket === 'US' ? item.exchange || 'ND' : '';
       const cacheKey = `${itemMarket}:${item.code}:${exchange}`;
       const requestId = ++marketRequestId.current;
       marketAbortController.current?.abort();
-      setLoadedInstrumentKey('');
+      if(!refresh)setLoadedInstrumentKey('');
 
       const applyPayload = (payload: MarketDataCacheEntry['payload']) => {
         setData(payload.candles);
         setHigherTimeframeData(payload.timeframes || {});
         setDataSource('kiwoom');
         setLoadedInstrumentKey(`${itemMarket}:${item.code}`);
-        setTimeframe('1D');
+        if(!refresh)setTimeframe('1D');
         setStatus(
           `${payload.name || item.name} · ${payload.source || '시장 데이터'} · ${payload.candles.length.toLocaleString()}개 캔들 · ${new Date(payload.fetchedAt || Date.now()).toLocaleString('ko-KR')}`,
         );
@@ -2988,7 +3016,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       const cached = marketDataCache.current.get(cacheKey);
       if (cached) {
         applyPayload(cached.payload);
-        if (Date.now() - cached.cachedAt < MARKET_DATA_CACHE_TTL_MS) {
+        if (!refresh && Date.now() - cached.cachedAt < MARKET_DATA_CACHE_TTL_MS) {
           setLoading(false);
           return;
         }
@@ -3050,6 +3078,14 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     },
     [market],
   );
+
+  useEffect(() => {
+    if(dataSource!=='kiwoom'||!chartMatchesSelection)return;
+    const timer=window.setInterval(()=>{
+      if(document.visibilityState==='visible'&&!marketAbortController.current)void loadMarketData(current,true);
+    },60_000);
+    return ()=>window.clearInterval(timer);
+  },[dataSource,chartMatchesSelection,current.code,current.exchange,loadMarketData]);
 
   const refreshLiveQuotes = useCallback(async () => {
     if (!storageReady || !activeWatchedSymbols.length || liveRequestInFlight.current)
@@ -3374,20 +3410,21 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     );
   };
 
-  const timeframeRows = (['1D', '4H', '1H', '15m', '5m'] as Timeframe[]).map(
+  const timeframeRows = (['1D', '4H', '1H', '15m', '1m', '5m'] as Timeframe[]).map(
     (name) => [name, timeframeSnapshots[name]] as [Timeframe, Snapshot],
   );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
-    { key: 'structure', label: '스윙구조' },
-    { key: 'choch', label: 'CHOCH' },
+    { key: 'structure', label: '1 스윙구조' },
     { key: 'swingLabels', label: 'HH·HL·LH·LL' },
-    { key: 'premiumDiscount', label: 'Premium/Discount' },
-    { key: 'internalStructure', label: '내부구조' },
-    { key: 'volume', label: '거래량' },
-    { key: 'volumeProfile', label: 'VP' },
-    { key: 'orderflow', label: 'OB/FVG' },
-    { key: 'liquidity', label: '유동성' },
-    { key: 'forecast', label: '진입예측' },
+    { key: 'premiumDiscount', label: '2 Premium/Discount' },
+    { key: 'supplyDemand', label: '3 수요·공급 등급' },
+    { key: 'liquidity', label: '4 유동성' },
+    { key: 'internalStructure', label: '5 내부구조' },
+    { key: 'choch', label: '6 CHoCH' },
+    { key: 'forecast', label: '7 진입·손절·목표' },
+    { key: 'orderflow', label: '보조 OB/FVG' },
+    { key: 'volume', label: '보조 거래량' },
+    { key: 'volumeProfile', label: '보조 VP' },
   ];
 
   return (
@@ -3479,7 +3516,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </div>
         <button
           className="primary"
-          onClick={() => loadMarketData(current)}
+          onClick={() => loadMarketData(current,true)}
           disabled={loading || !hasMarketSelection}
         >
           {loading ? (
@@ -3671,7 +3708,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   {selectedDirection}
                 </strong>
                 <span>
-                  {executionAnalysis.bias} · 조건 충족 {executionAnalysis.confidence}/100 (승률 아님) · 15m 실행 기준
+                  {executionAnalysis.bias} · 조건 충족 {executionAnalysis.confidence}/100 (승률 아님) · 1m 정제 기준 · 자동 진입은 순서·등급·비용 별도 검증
                 </span>
               </div>
               <h1>
@@ -3679,7 +3716,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               </h1>
               <p>
                 {timeframeSnapshots[timeframe].event} · {timeframeContext} ·
-                15m 진입 구간 · 5m 체결 트리거
+                15m 기원 구역 · 1m 진입 정제
               </p>
             </div>
             <div className="metric">
@@ -3880,7 +3917,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   <b>{multiTimeframeEntry.status}</b>
                 </header>
                 <h3>{multiTimeframeEntry.summary}</h3>
-                <p>1D 방향부터 5m 실행 트리거까지 순서대로 확인합니다.</p>
+                <p>1D 배경부터 1m 진입 정제까지 순서대로 확인합니다.</p>
                 <ol className="entry-gate-steps">
                   {multiTimeframeEntry.steps.map((step) => (
                     <li key={step.timeframe} className={step.state.toLowerCase()}>
@@ -3925,7 +3962,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <h3>
                   {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.entry[0], market)} – ${formatPrice(executionAnalysis.entry[1], market)}` : '유효 구조 영역 대기'}
                 </h3>
-                <p>15분 BOS 기원 영역 · 유리한 반범위 · 5분 반응 확인. VP는 보조입니다.</p>
+                <p>1분 정제 가격 참고 · 자동 실험은 H4→M15→M1 순서와 H1 PP·등급·비용을 별도 검증합니다.</p>
                 <ul className="forecast-reasons">
                   {executionAnalysis.entryForecast.reasons.map((reason) => (
                     <li
@@ -4053,7 +4090,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 ))}
               </div>
               <span>
-                원본 5분봉을 {timeframeLabels[backtestTimeframe]}으로 묶어 계산
+                {backtestTimeframe==='1m'?'원본 1분봉만 사용 · 없으면 실행 불가':`보유한 ${timeframeLabels[backtestTimeframe]} 데이터로 계산`}
                 · 사용 가능 {draftBacktestData.length.toLocaleString()}봉
               </span>
             </div>
@@ -4413,7 +4450,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   </h3>
                   <p>
                     {selectedEntryStep.state === 'PASS'
-                      ? '이 단계는 통과했지만 전체 진입은 4H·15m·5m가 같은 방향으로 정렬되고 실행 트리거까지 나와야 준비 상태가 됩니다.'
+                      ? '이 단계는 통과했지만 전체 진입은 4H·1H(PP)·15m·1m의 순서·포함·재접촉과 등급·비용 조건을 확인해야 합니다.'
                       : selectedEntryStep.state === 'BLOCK'
                         ? '상위 편향에 집착하지 않고 하위 구조의 실제 발전을 관찰합니다. 반대 방향이 지속되면 편향 변경도 허용합니다.'
                         : '낮은 시간대가 높은 시간대 편향과 같은 방향으로 정렬되기를 기다린 뒤 진입합니다.'}

@@ -18,6 +18,8 @@ const validUsExchanges = new Set<KiwoomUsExchange>(['NA', 'ND', 'NY']);
 export async function GET(request: Request) {
   if (!await getUser(request)) return Response.json({ error: '로그인이 필요합니다.' }, { status: 401 });
   const url = new URL(request.url);
+  // The main chart and paper engine share the native M1 contract.
+  url.searchParams.set('auto', '1');
   if (isKiwoomBridgeConfigured()) {
     try {
       const bridged = await fetchFromKiwoomBridge(
@@ -65,6 +67,7 @@ export async function GET(request: Request) {
           : {}),
       },
       request.signal,
+      true,
     );
     return Response.json(
       { ...chart, fetchedAt: new Date().toISOString() },

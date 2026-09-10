@@ -1,23 +1,25 @@
 import { mapMarketStructure, mechanicalInternalPivots } from './market-structure.ts';
 import type { Candle } from './engine';
 
-// A versioned, conservative LONG continuation experiment. No broker order API.
-export const AUTO_VERSION = 'PP-H4-M15-M1-close-v1';
-export type Zone = { low: number; high: number; at: number; id: string };
+// Paper-only continuation experiment. Grade weights and partial exits are policy, not lecture formulas.
+export const AUTO_VERSION = 'PP-H4-M15-M1-long-short-partial-v2';
+export type Direction = 'LONG' | 'SHORT';
+export type ZoneGrade = { grade: 'A'|'B'|'C'; score: number; maximum: number; reasons: string[]; retests: number };
+export type Zone = { low: number; high: number; at: number; id: string; quality?: ZoneGrade };
 export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number };
-export type AutoFill = { id: string; side: 'BUY'|'SELL'; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
+export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
 export type AutoState = {
   version: string; startedAt: number; cash: number; lastBar: number; lastChecked: number;
   stage: string; reason: string; source: string; mark: number; benchmarkStart: number;
   lastFreshAt?: number; chart?: Candle[];
-  setup?: { id: string; zone: Zone; target: number; expires: number; touch?: number; m15?: Zone; retest?: number; m1?: Zone; used?: boolean };
-  position?: { quantity: number; entry: number; fee: number; stop: number; target: number; at: number; risk: number; setupId: string };
+  setup?: { id: string; direction?: Direction; zone: Zone; target: number; expires: number; touch?: number; m15?: Zone; retest?: number; m1?: Zone; used?: boolean };
+  position?: { direction?: Direction; quantity: number; entry: number; fee: number; stop: number; target: number; at: number; risk: number; setupId: string; partialTarget?: number; partialQuantity?: number; partialDone?: boolean; realized?: number };
   fills: AutoFill[]; audit: { at: number; stage: string; reason: string }[];
   closed: number; wins: number; netPnl: number; sumR: number; peak: number; maxDrawdown: number;
 };
 export type AutoFeed = { source: string; symbol: string; timeframes: { '1m'?: Candle[]; '15m': Candle[]; '1H': Candle[]; '4H': Candle[] }; price: number; observedAt: number };
 export function newAutoState(config: AutoConfig, now: number): AutoState {
-  return { version: AUTO_VERSION, startedAt: now, cash: config.capital, lastBar: now, lastChecked: 0, stage: 'WAIT_CONTEXT', reason: '4시간 상승 구조와 할인 구역 대기', source: '', mark: 0, benchmarkStart: 0, fills: [], audit: [], closed: 0, wins: 0, netPnl: 0, sumR: 0, peak: config.capital, maxDrawdown: 0 };
+  return { version: AUTO_VERSION, startedAt: now, cash: config.capital, lastBar: now, lastChecked: 0, stage: 'WAIT_CONTEXT', reason: '4시간 수요·공급 구역과 롱·숏 PP 조건 대기', source: '', mark: 0, benchmarkStart: 0, fills: [], audit: [], closed: 0, wins: 0, netPnl: 0, sumR: 0, peak: config.capital, maxDrawdown: 0 };
 }
 function status(s: AutoState, at: number, stage: string, reason: string) {
   if (s.stage !== stage || s.reason !== reason) s.audit.unshift({ at, stage, reason });
@@ -31,7 +33,7 @@ export function validBars(bars: Candle[]): boolean {
 export function closedBars(bars: Candle[], minutes: number, at: number): Candle[] {
   return bars.filter((b,i) => i < bars.length - 1 && Date.parse(b.date) + minutes * 60_000 <= at);
 }
-function internalDirection(bars: Candle[]) {
+export function internalDirection(bars: Candle[]) {
   const pivots = mechanicalInternalPivots(bars);
   let direction = 0; let high = 0; let low = 0; let cursor = 0;
   for (let i=0; i<bars.length; i++) {
@@ -43,64 +45,97 @@ function internalDirection(bars: Candle[]) {
   }
   return direction;
 }
-export function qualifiedZone(bars: Candle[], minutes: number): { zone: Zone; target: number } | undefined {
-  const m=mapMarketStructure(bars);
-  if(m.trend!=='BULLISH' || !m.protectedLevel || !m.weakLevel || !m.range) return;
-  const origin=bars[m.protectedLevel.index];
-  const low=origin.low, high=Math.min(Math.max(origin.open,origin.close),m.range.equilibrium);
-  const event=m.events.findLast(e=>e.kind==='BOS' && e.direction==='BULLISH');
-  if(!event || high<=low || m.weakLevel.price<=high) return;
-  const at=Math.max(Date.parse(bars[event.index].date),Date.parse(bars[m.range.confirmedAt].date))+minutes*60_000;
-  return {zone:{low,high,at,id:`${minutes}:${origin.date}:${at}`},target:m.weakLevel.price};
+export function gradeZone(bars: Candle[], zone: Zone, direction: Direction, minutes: number, nested=false): ZoneGrade {
+  const width=zone.high-zone.low;
+  const later=bars.filter(b=>Date.parse(b.date)+minutes*60000>zone.at);
+  let retests=0, touching=false;
+  for(const b of later) { const hit=b.low<=zone.high&&b.high>=zone.low; if(hit&&!touching)retests++; touching=hit; }
+  const displacement=bars.filter(b=>Date.parse(b.date)+minutes*60000<=zone.at).slice(-3).some(b=>
+    direction==='LONG'?b.close-zone.high>=width*1.5:zone.low-b.close>=width*1.5);
+  const reasons=['확정 구조 돌파 +1','상위 범위의 유리한 반구간 +1',
+    displacement?'구역 폭 1.5배 이상 이탈 +1':'구역 폭 1.5배 이탈 미확인 +0',
+    retests===0?'확정 후 재접촉 없음 +1':`확정 후 재접촉 ${retests}회 +0`,
+    retests<=1?'재접촉 1회 이하 +1':'반복 재접촉 +0'];
+  if(nested)reasons.push('상위 구역 안에 포함 +1');
+  const score=2+Number(displacement)+Number(retests===0)+Number(retests<=1)+Number(nested);
+  return {grade:score>=4?'A':score>=3?'B':'C',score,maximum:nested?6:5,reasons,retests};
 }
-export function shiftedZone(bars: Candle[], minutes: number, after: number, parent: Zone) {
+export function qualifiedZone(bars: Candle[], minutes: number): { zone: Zone; target: number; direction: Direction } | undefined {
+  const m=mapMarketStructure(bars);
+  if(!['BULLISH','BEARISH'].includes(m.trend) || !m.protectedLevel || !m.weakLevel || !m.range) return;
+  const direction:Direction=m.trend==='BULLISH'?'LONG':'SHORT', long=direction==='LONG';
+  const origin=bars[m.protectedLevel.index];
+  const low=long?origin.low:Math.max(Math.min(origin.open,origin.close),m.range.equilibrium);
+  const high=long?Math.min(Math.max(origin.open,origin.close),m.range.equilibrium):origin.high;
+  const event=m.events.findLast(e=>e.kind==='BOS' && e.direction===m.trend);
+  if(!event || high<=low || (long?m.weakLevel.price<=high:m.weakLevel.price>=low)) return;
+  const at=Math.max(Date.parse(bars[event.index].date),Date.parse(bars[m.range.confirmedAt].date))+minutes*60_000;
+  const zone:Zone={low,high,at,id:`${minutes}:${origin.date}:${at}`};
+  zone.quality=gradeZone(bars,zone,direction,minutes);
+  return {zone,target:m.weakLevel.price,direction};
+}
+export function shiftedZone(bars: Candle[], minutes: number, after: number, parent: Zone, direction:Direction='LONG') {
+  const long=direction==='LONG', trend=long?'BULLISH':'BEARISH';
   const m=mapMarketStructure(bars), event=m.events.at(-1);
-  if(!event || event.direction!=='BULLISH') return;
+  if(!event || event.direction!==trend) return;
   const at=Date.parse(bars[event.index].date)+minutes*60_000;
   if(at<=after) return;
   // A bullish CHoCH, or its following BOS, must originate after the parent touch.
-  const reversal=m.events.findLast(e=>e.direction==='BULLISH' && e.kind==='CHOCH' && e.index<=event.index);
+  const reversal=m.events.findLast(e=>e.direction===trend && e.kind==='CHOCH' && e.index<=event.index);
   if(!reversal || Date.parse(bars[reversal.index].date)+minutes*60_000<=after) return;
   const start=event.kind==='CHOCH' ? event.pivotIndex : reversal.index;
   let index=start;
-  for(let i=start;i<=event.index;i++) if(bars[i].low<bars[index].low) index=i;
-  const origin=bars[index], low=origin.low, high=Math.max(origin.open,origin.close);
+  for(let i=start;i<=event.index;i++) if(long?bars[i].low<bars[index].low:bars[i].high>bars[index].high) index=i;
+  const origin=bars[index], low=long?origin.low:Math.min(origin.open,origin.close), high=long?Math.max(origin.open,origin.close):origin.high;
   if(high<=low || low<parent.low || high>parent.high) return;
-  return { low,high,at,id:`${minutes}:${origin.date}:${at}` };
+  const zone:Zone={low,high,at,id:`${minutes}:${origin.date}:${at}`};
+  // Nesting is observed here; the parent already provides the location qualification.
+  zone.quality=gradeZone(bars,zone,direction,minutes,true);
+  return zone;
 }
-export function entryTerms(price: number, stop: number, target: number, cash: number, config: AutoConfig) {
-  if(![price,stop,target,cash,config.riskPct,config.feeBps,config.slippageBps].every(Number.isFinite) || !(stop>0&&stop<price&&price<target&&cash>0&&config.riskPct>0&&config.riskPct<=1&&config.feeBps>=0&&config.slippageBps>=0)) return {entry:0,unitRisk:0,quantity:0,rr:0};
+export function entryTerms(price: number, stop: number, target: number, cash: number, config: AutoConfig, direction:Direction='LONG') {
+  const d=direction==='LONG'?1:-1;
+  if(![price,stop,target,cash,config.riskPct,config.feeBps,config.slippageBps].every(Number.isFinite) || !(Math.min(stop,target,price)>0&&d*(price-stop)>0&&d*(target-price)>0&&cash>0&&config.riskPct>0&&config.riskPct<=1&&config.feeBps>=0&&config.slippageBps>=0&&config.slippageBps<10000&&config.feeBps<10000)) return {entry:0,unitRisk:0,quantity:0,rr:0};
   const fee=config.feeBps/10000, slip=config.slippageBps/10000;
-  const entry=price*(1+slip), exitStop=stop*(1-slip), exitTarget=target*(1-slip);
-  const unitRisk=entry-exitStop+(entry+exitStop)*fee;
-  const reward=exitTarget-entry-(entry+exitTarget)*fee;
+  const entry=price*(1+d*slip), exitStop=stop*(1-d*slip), exitTarget=target*(1-d*slip);
+  const unitRisk=d*(entry-exitStop)+(entry+exitStop)*fee;
+  const reward=d*(exitTarget-entry)-(entry+exitTarget)*fee;
   const quantity=Math.floor(Math.min(cash*config.riskPct/100/unitRisk,cash/(entry*(1+fee))));
   return { entry, unitRisk, quantity, rr: reward/unitRisk };
 }
-export function exitPosition(s: AutoState, config: AutoConfig, price: number, at: number, reason: string, observedAt: number) {
+export function exitPosition(s: AutoState, config: AutoConfig, price: number, at: number, reason: string, observedAt: number, quantity?: number) {
   const p=s.position; if(!p) return;
-  const execution=price*(1-config.slippageBps/10000), fee=execution*p.quantity*config.feeBps/10000;
-  const pnl=(execution-p.entry)*p.quantity-p.fee-fee, r=pnl/p.risk;
-  s.cash+=execution*p.quantity-fee; s.netPnl+=pnl; s.sumR+=r; s.closed++; if(pnl>0)s.wins++;
-  s.fills.unshift({id:`${p.setupId}:SELL`,side:'SELL',at,price:execution,quantity:p.quantity,fee,reason,pnl,r,setupId:p.setupId,source:s.source,observedAt});
+  const direction=p.direction||'LONG', d=direction==='LONG'?1:-1;
+  const qty=Math.min(p.quantity,quantity??p.quantity); if(!Number.isInteger(qty)||qty<=0)return;
+  const partial=qty<p.quantity;
+  const execution=price*(1-d*config.slippageBps/10000), fee=execution*qty*config.feeBps/10000;
+  const entryFee=p.fee*qty/p.quantity, pnl=d*(execution-p.entry)*qty-entryFee-fee, r=pnl/p.risk;
+  // Fully funded paper shorts: release reserved entry notional plus trading P&L.
+  s.cash+=(p.entry+d*(execution-p.entry))*qty-fee; s.netPnl+=pnl;
+  s.fills.unshift({id:`${p.setupId}:${partial?'PARTIAL':'EXIT'}`,side:d===1?'SELL':'BUY',direction,action:partial?'PARTIAL':'EXIT',model:s.version,at,price:execution,quantity:qty,fee,reason,pnl,r,setupId:p.setupId,source:s.source,observedAt});
+  p.realized=(p.realized||0)+pnl;
+  if(partial) {p.quantity-=qty;p.fee-=entryFee;p.partialDone=true;return;}
+  s.sumR+=p.realized/p.risk;s.closed++;if(p.realized>0)s.wins++;
   delete s.position; if(s.setup)s.setup.used=true;
   status(s,observedAt,'CLOSED',reason);
 }
 export function advanceAuto(previous: AutoState, config: AutoConfig, feed: AutoFeed, now: number, enabled=true, closeRequested=false): AutoState {
   const s=structuredClone(previous); s.lastChecked=now;
+  const v2=s.version===AUTO_VERSION;
   const one=feed.timeframes['1m'] || [];
   if(feed.symbol!==config.symbol || !feed.source.startsWith('Kiwoom REST API') || [one,feed.timeframes['15m'],feed.timeframes['1H'],feed.timeframes['4H']].some(b=>b.length<20 || !validBars(b))) {
     status(s,now,'DATA_WAIT','동일 종목의 키움 1분·15분·1시간·4시간 원본 데이터 대기'); return s;
   }
   const latest=Date.parse(one.at(-1)!.date);
-  if(latest>now || now-latest>120_000 || now-feed.observedAt>30_000 || feed.observedAt>now || !Number.isFinite(feed.price) || feed.price<=0) {
+  if(!Number.isFinite(feed.observedAt) || latest>now || now-latest>120_000 || now-feed.observedAt>30_000 || feed.observedAt>now || !Number.isFinite(feed.price) || feed.price<=0) {
     status(s,now,'DATA_WAIT','장 마감 또는 지연 시세: 새 체결 보류'); return s;
   }
   if(!s.position && ((s.lastFreshAt && now-s.lastFreshAt>180000) || (s.source && s.source!==feed.source))) delete s.setup;
   s.lastFreshAt=now;s.chart=one.slice(-90);
   s.source=feed.source; s.mark=feed.price; if(!s.benchmarkStart)s.benchmarkStart=feed.price;
   const h4=closedBars(feed.timeframes['4H'],240,now), h1=closedBars(feed.timeframes['1H'],60,now);
-  const context=qualifiedZone(h4,240);
+  let context=qualifiedZone(h4,240);
+  if(!v2 && context?.direction==='SHORT')context=undefined;
   const m1=closedBars(one,1,now);
   const newBars=m1.filter(b=>Date.parse(b.date)+60_000>s.lastBar);
   // Never backfill entries. Exit barriers on bars wholly after entry are conservative;
@@ -109,55 +144,77 @@ export function advanceAuto(previous: AutoState, config: AutoConfig, feed: AutoF
     for(const b of newBars) {
       if(Date.parse(b.date)<s.position.at) continue;
       const p=s.position;
-      if(b.low<=p.stop) { exitPosition(s,config,Math.min(b.open,p.stop),Date.parse(b.date)+60_000,'구조 손절 (동일 봉 양방향 도달 시 손절 우선)',now); break; }
-      if(b.high>=p.target) { exitPosition(s,config,p.target,Date.parse(b.date)+60_000,'4시간 약한 고점 목표 도달',now); break; }
+      const long=p.direction!=='SHORT', at=Date.parse(b.date)+60000;
+      if(long?b.low<=p.stop:b.high>=p.stop) { exitPosition(s,config,long?Math.min(b.open,p.stop):Math.max(b.open,p.stop),at,'구조 손절 (동일 봉 양방향 도달 시 손절 우선)',now); break; }
+      if(!p.partialDone && p.partialTarget && p.partialQuantity && (long?b.high>=p.partialTarget:b.low<=p.partialTarget))exitPosition(s,config,p.partialTarget,at,'비용 차감 1R · 최초 수량 50% 부분청산',now,p.partialQuantity);
+      if(long?b.high>=p.target:b.low<=p.target) { exitPosition(s,config,p.target,at,'4시간 약한 고점·저점 목표 도달',now); break; }
     }
-    if(s.position && (closeRequested || feed.price<=s.position.stop || feed.price>=s.position.target || mapMarketStructure(h4).trend!=='BULLISH'))
-      exitPosition(s,config,feed.price,now,closeRequested?'사용자 청산 요청':feed.price<=s.position.stop?'구조 손절':feed.price>=s.position.target?'목표 도달':'4시간 상승 구조 무효화',now);
+    if(s.position) {
+      const p=s.position, long=p.direction!=='SHORT';
+      const stopped=long?feed.price<=p.stop:feed.price>=p.stop;
+      const target=long?feed.price>=p.target:feed.price<=p.target;
+      const invalid=mapMarketStructure(h4).trend!==(long?'BULLISH':'BEARISH');
+      if(closeRequested||stopped||invalid)exitPosition(s,config,feed.price,now,closeRequested?'사용자 청산 요청':stopped?'구조 손절':'4시간 구조 무효화',now);
+      else {
+        if(!p.partialDone&&p.partialTarget&&p.partialQuantity&&(long?feed.price>=p.partialTarget:feed.price<=p.partialTarget))exitPosition(s,config,feed.price,now,'비용 차감 1R · 최초 수량 50% 부분청산',feed.observedAt,p.partialQuantity);
+        if(target)exitPosition(s,config,feed.price,now,'목표 도달',feed.observedAt);
+      }
+    }
   }
   s.lastBar=Math.max(s.lastBar,Date.parse(m1.at(-1)?.date||'')+60_000||0);
   if(s.position) { status(s,now,'HOLDING','보유 중 · 고정 손절·목표 및 4시간 구조 감시'); return markEquity(s); }
   if(!enabled || closeRequested) { status(s,now,'PAUSED','신규 진입 중지'); return markEquity(s); }
   if(s.closed>=500) {status(s,now,'COMPLETE','500건 실험 완료 · 결과 검토 후 새 모델로 진행');return markEquity(s);}
-  if(!context) { delete s.setup; status(s,now,'WAIT_CONTEXT','4시간 상승 BOS와 확정 할인 구역 대기'); return markEquity(s); }
+  if(!context) { delete s.setup; status(s,now,'WAIT_CONTEXT','4시간 BOS와 확정 수요·공급 구역 대기'); return markEquity(s); }
   if(s.setup && s.setup.id!==context.zone.id) delete s.setup;
-  if(!s.setup) s.setup={id:context.zone.id,zone:context.zone,target:context.target,expires:now+7*86400000};
+  if(!s.setup) s.setup={id:context.zone.id,direction:context.direction,zone:context.zone,target:context.target,expires:now+7*86400000};
   const setup=s.setup;
+  const direction=setup.direction||'LONG', long=direction==='LONG';
   if(s.fills.some(f=>f.setupId===setup.id))setup.used=true;
   if(setup.used) { status(s,now,'WAIT_NEW_SETUP','같은 설정 재진입 금지 · 새 4시간 구조 대기'); return markEquity(s); }
   const invalidZone=setup.m1||setup.m15||setup.zone;
-  if(now>setup.expires || (m1.at(-1) && m1.at(-1)!.close<invalidZone.low)) {setup.used=true;status(s,now,'INVALIDATED','기원 구역 종가 이탈 또는 설정 유효시간 종료');return markEquity(s);}
-  if(setup.m1) {const last=mapMarketStructure(m1).events.at(-1);if(last?.direction==='BEARISH' && Date.parse(m1[last.index].date)+60000>setup.m1.at){setup.used=true;status(s,now,'INVALIDATED','진입 전 1분 구조가 하락 전환');return markEquity(s);}}
+  if(now>setup.expires || (m1.at(-1) && (long?m1.at(-1)!.close<invalidZone.low:m1.at(-1)!.close>invalidZone.high))) {setup.used=true;status(s,now,'INVALIDATED','기원 구역 종가 이탈 또는 설정 유효시간 종료');return markEquity(s);}
+  if(setup.m1) {const last=mapMarketStructure(m1).events.at(-1);if(last?.direction===(long?'BEARISH':'BULLISH') && Date.parse(m1[last.index].date)+60000>setup.m1.at){setup.used=true;status(s,now,'INVALIDATED','진입 전 1분 구조가 반대 방향으로 전환');return markEquity(s);}}
   const inside=(z:Zone)=>feed.price>=z.low && feed.price<=z.high;
   if(!setup.touch) {
-    if(inside(setup.zone) && now>setup.zone.at) {setup.touch=now;status(s,now,'WAIT_M15_SHIFT','4시간 할인 구역 접촉 확인 · 이후 15분 상승 전환 대기');}
-    else status(s,now,'WAIT_H4_TOUCH','4시간 할인 구역 실제 시세 접촉 대기');
+    if(inside(setup.zone) && now>setup.zone.at) {setup.touch=now;status(s,now,'WAIT_M15_SHIFT','4시간 수요·공급 구역 접촉 확인 · 이후 15분 진입 방향 전환 대기');}
+    else status(s,now,'WAIT_H4_TOUCH','4시간 수요·공급 구역 실제 시세 접촉 대기');
     return markEquity(s);
   }
   if(!setup.m15) {
-    setup.m15=shiftedZone(closedBars(feed.timeframes['15m'],15,now),15,setup.touch,setup.zone);
-    status(s,now,setup.m15?'WAIT_M15_RETEST':'WAIT_M15_SHIFT',setup.m15?'15분 상승 전환 확인 · 기원 구역 재접촉 대기':'접촉 이후 15분 종가 전환·구역 확정 대기'); return markEquity(s);
+    setup.m15=shiftedZone(closedBars(feed.timeframes['15m'],15,now),15,setup.touch,setup.zone,direction);
+    status(s,now,setup.m15?'WAIT_M15_RETEST':'WAIT_M15_SHIFT',setup.m15?'15분 진입 방향 전환 확인 · 기원 구역 재접촉 대기':'접촉 이후 15분 종가 전환·구역 확정 대기'); return markEquity(s);
   }
   if(!setup.retest) {
     if(inside(setup.m15) && now>setup.m15.at) setup.retest=now;
-    status(s,now,setup.retest?'WAIT_M1_SHIFT':'WAIT_M15_RETEST',setup.retest?'15분 재접촉 확인 · 이후 1분 상승 전환 대기':'15분 기원 구역 재접촉 대기'); return markEquity(s);
+    status(s,now,setup.retest?'WAIT_M1_SHIFT':'WAIT_M15_RETEST',setup.retest?'15분 재접촉 확인 · 이후 1분 진입 방향 전환 대기':'15분 기원 구역 재접촉 대기'); return markEquity(s);
   }
   if(!setup.m1) {
-    setup.m1=shiftedZone(m1,1,setup.retest,setup.m15);
-    status(s,now,setup.m1?'WAIT_ENTRY':'WAIT_M1_SHIFT',setup.m1?'1분 상승 전환 확인 · 정제 구역 재접촉 대기':'15분 재접촉 이후 1분 종가 전환 대기'); return markEquity(s);
+    setup.m1=shiftedZone(m1,1,setup.retest,setup.m15,direction);
+    status(s,now,setup.m1?'WAIT_ENTRY':'WAIT_M1_SHIFT',setup.m1?'1분 진입 방향 전환 확인 · 정제 구역 재접촉 대기':'15분 재접촉 이후 1분 종가 전환 대기'); return markEquity(s);
   }
   if(now-setup.m1.at>30*60000) {setup.used=true;status(s,now,'EXPIRED','1분 진입 대기 30분 만료');return markEquity(s);}
-  if(internalDirection(h1)!==1) {status(s,now,'WAIT_PP','1시간 내부 상승 동행(PP) 대기');return markEquity(s);}
-  const buffer=setup.m1.low*0.001; // explicit experimental policy, not an exchange tick rule
-  const stop=setup.m1.low-buffer;
-  const terms=entryTerms(feed.price,stop,setup.target,s.cash,config);
-  if(!inside(setup.m1) || now<=setup.m1.at || !(terms.rr>=2) || terms.quantity<1) {
+  if(internalDirection(h1)!==(long?1:-1)) {status(s,now,'WAIT_PP','1시간 내부 구조의 진입 방향 동행(PP) 대기');return markEquity(s);}
+  if(v2) {
+    setup.zone.quality=gradeZone(h4,setup.zone,direction,240);
+    setup.m15.quality=gradeZone(closedBars(feed.timeframes['15m'],15,now),setup.m15,direction,15,true);
+    setup.m1.quality=gradeZone(m1,setup.m1,direction,1,true);
+    if([setup.zone,setup.m15,setup.m1].some(z=>z.quality?.grade==='C')) {status(s,now,'WAIT_GRADE','C등급 구역 제외 · A/B등급 기회 대기');return markEquity(s);}
+  }
+  const stop=long?setup.m1.low*.999:setup.m1.high*1.001;
+  const terms=entryTerms(feed.price,stop,setup.target,s.cash,config,direction);
+  const partialQuantity=v2?Math.floor(terms.quantity/2):0;
+  const blendedR=terms.quantity?(partialQuantity+(terms.quantity-partialQuantity)*terms.rr)/terms.quantity:0;
+  if(!inside(setup.m1) || now<=setup.m1.at || !(blendedR>=2) || terms.quantity<1) {
     status(s,now,'WAIT_ENTRY','1분 구역 재접촉·비용 차감 2R·위험 한도 확인 중');return markEquity(s);
   }
   const fee=terms.entry*terms.quantity*config.feeBps/10000;
   s.cash-=terms.entry*terms.quantity+fee;
-  s.position={quantity:terms.quantity,entry:terms.entry,fee,stop,target:setup.target,at:now,risk:terms.unitRisk*terms.quantity,setupId:setup.id};
-  s.fills.unshift({id:`${setup.id}:BUY`,side:'BUY',at:now,price:terms.entry,quantity:terms.quantity,fee,reason:'H4 할인 접촉 → M15 전환·재접촉 → M1 전환·재접촉 + H1 PP + 순 2R',pnl:0,r:0,setupId:setup.id,source:s.source,observedAt:feed.observedAt});
-  setup.used=true; status(s,now,'HOLDING','조건 충족 · 현재 관측 시세로 모의 매수'); return markEquity(s);
+  const d=long?1:-1, rate=config.feeBps/10000;
+  const partialTarget=(terms.unitRisk+terms.entry*(d+rate))/(d-rate)/(1-d*config.slippageBps/10000);
+  s.position={direction,quantity:terms.quantity,entry:terms.entry,fee,stop,target:setup.target,at:now,risk:terms.unitRisk*terms.quantity,setupId:setup.id,...(partialQuantity?{partialQuantity,partialTarget}: {})};
+  s.fills.unshift({id:`${setup.id}:ENTRY`,side:long?'BUY':'SELL',direction,action:'ENTRY',model:s.version,at:now,price:terms.entry,quantity:terms.quantity,fee,reason:`${direction} · H4 접촉 → M15 전환·재접촉 → M1 전환·재접촉 + H1 PP + 부분청산 반영 순 2R`,pnl:0,r:0,setupId:setup.id,source:s.source,observedAt:feed.observedAt});
+  setup.used=true; status(s,now,'HOLDING',`조건 충족 · 현재 관측 시세로 ${long?'롱':'숏'} 모의 진입`); return markEquity(s);
 }
-function markEquity(s:AutoState) { const equity=s.cash+(s.position?s.position.quantity*s.mark:0);s.peak=Math.max(s.peak,equity);s.maxDrawdown=Math.max(s.maxDrawdown,(s.peak-equity)/s.peak*100); return s; }
+export function autoEquity(s:AutoState) {const p=s.position;return s.cash+(p?p.quantity*(p.entry+(p.direction==='SHORT'?-1:1)*(s.mark-p.entry)):0);}
+function markEquity(s:AutoState) { const equity=autoEquity(s);s.peak=Math.max(s.peak,equity);s.maxDrawdown=Math.max(s.maxDrawdown,(s.peak-equity)/s.peak*100); return s; }
