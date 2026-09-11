@@ -8,10 +8,19 @@ export type ZoneGrade = { grade: 'A'|'B'|'C'; score: number; maximum: number; re
 export type Zone = { low: number; high: number; at: number; id: string; quality?: ZoneGrade };
 export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number };
 export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
+export type AutoDecision = {
+  at: number; model: string; stage: string; reason: string; symbol: string;
+  source: string; observedAt: number | null; price: number | null;
+  config: AutoConfig; setup?: AutoState['setup']; position?: AutoState['position'];
+  bars: { timeframe: string; received: number; completed: number; lastCompleted: string | null }[];
+  checks?: { insideM1: boolean; afterM1: boolean; quantity: number; stop: number; target: number; netTargetR: number; weightedR: number; h1Direction: number };
+  fills: AutoFill[];
+};
 export type AutoState = {
   version: string; startedAt: number; cash: number; lastBar: number; lastChecked: number;
   stage: string; reason: string; source: string; mark: number; benchmarkStart: number;
   lastFreshAt?: number; chart?: Candle[];
+  decisions?: AutoDecision[];
   setup?: { id: string; direction?: Direction; zone: Zone; target: number; expires: number; touch?: number; m15?: Zone; retest?: number; m1?: Zone; used?: boolean };
   position?: { direction?: Direction; quantity: number; entry: number; fee: number; stop: number; target: number; at: number; risk: number; setupId: string; partialTarget?: number; partialQuantity?: number; partialDone?: boolean; realized?: number };
   fills: AutoFill[]; audit: { at: number; stage: string; reason: string }[];
@@ -119,7 +128,31 @@ export function exitPosition(s: AutoState, config: AutoConfig, price: number, at
   delete s.position; if(s.setup)s.setup.used=true;
   status(s,observedAt,'CLOSED',reason);
 }
+export function recordAutoDecision(previous: AutoState, s: AutoState, config: AutoConfig, now: number, feed?: AutoFeed): AutoState {
+  const fills=s.fills.filter(f=>!previous.fills.some(old=>old.id===f.id));
+  const latest=previous.decisions?.[0];
+  // Capture transitions and one sample per minute, without growing every poll.
+  if(latest && latest.stage===s.stage && latest.reason===s.reason && latest.setup?.id===s.setup?.id && !fills.length && Math.floor(latest.at/60000)===Math.floor(now/60000))return s;
+  const bars=feed?Object.entries(feed.timeframes).map(([timeframe,rows])=>{
+    const minutes=({'1m':1,'15m':15,'1H':60,'4H':240} as Record<string,number>)[timeframe];
+    const completed=closedBars(rows||[],minutes,now);
+    return {timeframe,received:rows?.length||0,completed:completed.length,lastCompleted:completed.at(-1)?.date||null};
+  }):[];
+  let checks:AutoDecision['checks'];
+  if(feed && s.stage!=='DATA_WAIT' && s.setup?.m1) {
+    const z=s.setup.m1, direction=s.setup.direction||'LONG', stop=direction==='LONG'?z.low*.999:z.high*1.001;
+    const terms=entryTerms(feed.price,stop,s.setup.target,previous.cash,config,direction);
+    const partial=s.version===AUTO_VERSION?Math.floor(terms.quantity/2):0;
+    checks={insideM1:feed.price>=z.low&&feed.price<=z.high,afterM1:now>z.at,quantity:terms.quantity,stop,target:s.setup.target,netTargetR:terms.rr,weightedR:terms.quantity?(partial+(terms.quantity-partial)*terms.rr)/terms.quantity:0,h1Direction:internalDirection(closedBars(feed.timeframes['1H'],60,now))};
+  }
+  const decision:AutoDecision={at:now,model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
+  s.decisions=[decision,...(previous.decisions||[])].slice(0,200);
+  return s;
+}
 export function advanceAuto(previous: AutoState, config: AutoConfig, feed: AutoFeed, now: number, enabled=true, closeRequested=false): AutoState {
+  return recordAutoDecision(previous,advanceAutoCore(previous,config,feed,now,enabled,closeRequested),config,now,feed);
+}
+function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed, now: number, enabled=true, closeRequested=false): AutoState {
   const s=structuredClone(previous); s.lastChecked=now;
   const v2=s.version===AUTO_VERSION;
   const one=feed.timeframes['1m'] || [];

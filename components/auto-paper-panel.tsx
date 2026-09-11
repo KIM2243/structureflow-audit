@@ -31,6 +31,7 @@ export function AutoPaperPanel({market,symbol,exchange,name,active}:Props) {
   const s=run?.state;
   const money=(n:number)=>new Intl.NumberFormat('ko-KR',{style:'currency',currency:run?.config.market==='KR'?'KRW':'USD',maximumFractionDigits:run?.config.market==='KR'?0:2}).format(n);
   const equity=s?autoEquity(s):0;
+  function downloadDecisions(){if(!run)return;const url=URL.createObjectURL(new Blob([JSON.stringify({schema:'decision-log-v1',exportedAt:new Date().toISOString(),runId:run.id,symbol:run.config.symbol,retention:200,decisions:run.state.decisions||[]},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`${run.config.symbol}-decisions.json`;a.click();URL.revokeObjectURL(url);}
   function download(){if(!run)return;const rows=[['model','symbol','direction','action','side','filled_at','observed_at','price','quantity','fee','net_pnl','net_r','reason','source','setup'],...run.state.fills.map(f=>[f.model||run.state.version,run.config.symbol,f.direction||'LONG',f.action||f.side,f.side,new Date(f.at).toISOString(),new Date(f.observedAt).toISOString(),f.price,f.quantity,f.fee,f.pnl,f.r,f.reason,f.source,f.setupId])];const csv='\uFEFF'+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`${run.config.symbol}-auto-paper.csv`;a.click();URL.revokeObjectURL(url);}
   return <section className="panel auto-paper-panel" aria-label="이론 기반 자동 모의투자">
     <div className="auto-paper-heading"><div><h2><Activity size={20}/> 이론 기반 자동 모의투자</h2><p>4시간 수요·공급 구역 → 15분 전환·재접촉 → 1분 전환·재접촉</p></div><button className="primary" disabled={busy||exists||runs.length>=6||!runnerReady} onClick={()=>void action('start')}><Play size={17}/>{exists?`${symbol} 실험 등록됨`:`${name} 자동 실험 시작`}</button></div>
@@ -50,7 +51,21 @@ export function AutoPaperPanel({market,symbol,exchange,name,active}:Props) {
       <div className="auto-zone-grades">{s.setup&&[['4H',s.setup.zone],['M15',s.setup.m15],['M1',s.setup.m1]].map(([label,z])=>{const zone=z as NonNullable<AutoState['setup']>['zone']|undefined;return zone?.quality?<details key={String(label)}><summary>{String(label)} {zone.quality.grade}등급 · {zone.quality.score}/{zone.quality.maximum}</summary><ul>{zone.quality.reasons.map(r=><li key={r}>{r}</li>)}</ul></details>:null;})}</div>
       <ExecutionChart state={s}/>
       <div className="paper-table-scroll"><table><thead><tr><th>시각</th><th>매수·매도</th><th>체결가</th><th>수량</th><th>비용 차감 손익</th><th>근거</th></tr></thead><tbody>{s.fills.slice(0,20).map(f=><tr key={f.id}><td>{time(f.at)}</td><td>{fillLabel(f)}</td><td>{money(f.price)}</td><td>{f.quantity}주</td><td>{(f.action?f.action!=='ENTRY':f.side==='SELL')?`${money(f.pnl)} (${f.r.toFixed(2)}R)`:'—'}</td><td>{f.reason}</td></tr>)}</tbody></table>{!s.fills.length&&<p className="auto-paper-note">아직 자동 체결이 없습니다. 조건을 충족할 때만 주문합니다.</p>}</div>
-      <details><summary>판단 단계 기록</summary>{s.audit.slice(0,20).map((a,i)=><p key={`${a.at}-${i}`} className="auto-paper-note">{time(a.at)} · {a.reason}</p>)}</details>
+      <details><summary>진입·대기·차단 판단 기록 ({s.decisions?.length||0}건)</summary>
+        <p className="auto-paper-note">단계·사유·설정 변경 및 체결 시 기록하고, 같은 상태는 분당 한 번 표본으로 남깁니다. 최근 200건만 보관하며 오래된 기록은 삭제됩니다. 중요한 기록은 내려받으세요. 업데이트 이전 판단은 소급 복원하지 않습니다.</p>
+        <button disabled={!s.decisions?.length} onClick={downloadDecisions}><Download size={16}/> 판단 근거 내려받기 (JSON)</button>
+        {(s.decisions||[]).map((a,i)=><details key={`${a.at}-${i}`} className="auto-decision"><summary>{time(a.at)} · {a.fills.length?'체결 · ':''}{a.reason}</summary>
+          <p>단계 {a.stage} · 모델 {a.model} · 종목 {a.symbol}</p>
+          <p>관측 가격 {a.price===null?'없음':money(a.price)} · 시세 시각 {a.observedAt?time(a.observedAt):'없음'} · 출처 {a.source||'연결 실패'}</p>
+          <p>위험 {a.config.riskPct}% · 편도 수수료 {a.config.feeBps}bp · 슬리피지 {a.config.slippageBps}bp</p>
+          {a.bars.map(b=><p key={b.timeframe}>{b.timeframe} 수신 {b.received}봉 / 완료 {b.completed}봉 · 마지막 완료 봉 시작 {b.lastCompleted?time(Date.parse(b.lastCompleted)):'없음'}</p>)}
+          {a.setup&&<><p>{a.setup.direction||'LONG'} 설정 · H4 접촉 {time(a.setup.touch||0)} · M15 재접촉 {time(a.setup.retest||0)}</p>{[['4H',a.setup.zone],['15m',a.setup.m15],['1m',a.setup.m1]].map(([frame,value])=>{const z=value as NonNullable<AutoState['setup']>['zone']|undefined;return z?<p key={String(frame)}>{String(frame)} {money(z.low)}–{money(z.high)} · {z.quality?`${z.quality.grade}등급 (${z.quality.score}/${z.quality.maximum}) · ${z.quality.reasons.join(' / ')}`:'등급 기록 없음'}</p>:null;})}</>}
+          {a.checks&&<><p>진입 후보 참고 계산 (각 단계의 최종 통과 판정과는 구분)</p><p>1분 구역 안 {a.checks.insideM1?'예':'아니오'} · 구역 확정 이후 {a.checks.afterM1?'예':'아니오'} · H1 내부 방향 {a.checks.h1Direction===1?'상승':a.checks.h1Direction===-1?'하락':'미확정'}</p><p>후보 수량 {a.checks.quantity}주 · 손절 {money(a.checks.stop)} · 목표 {money(a.checks.target)} · 최종 순 목표 {a.checks.netTargetR.toFixed(2)}R · 부분청산 가중 {a.checks.weightedR.toFixed(2)}R</p></>}
+          {a.fills.map(f=><p key={f.id}>{fillLabel(f)} {f.quantity}주 · {money(f.price)} · {f.reason}</p>)}
+        </details>)}
+        {!s.decisions?.length&&<p className="auto-paper-note">다음 자동 확인부터 상세 근거가 쌓입니다. 중지된 실험은 재개 후 기록합니다.</p>}
+        <details><summary>기존 간단 기록</summary>{s.audit.slice(0,20).map((a,i)=><p key={`${a.at}-${i}`} className="auto-paper-note">{time(a.at)} · {a.reason}</p>)}</details>
+      </details>
       <p className="auto-paper-note">체결은 서버가 관측한 시세를 사용합니다. 손절·목표는 이후 1분봉도 확인하며 같은 봉에서 둘 다 닿으면 손절을 우선합니다. 호가 대기열·부분 체결·세금은 반영하지 않습니다.</p>
     </>:<p className="auto-paper-note">위에서 종목을 선택한 뒤 자동 실험을 시작하세요. 시작 전의 과거 신호로 거래를 만들지 않습니다.</p>}
   </section>;

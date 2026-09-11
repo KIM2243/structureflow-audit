@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { advanceAuto, newAutoState, type AutoConfig, type AutoState } from './auto-paper';
+import { advanceAuto, newAutoState, recordAutoDecision, type AutoConfig, type AutoState } from './auto-paper';
 import { fetchFromKiwoomBridge } from './bridge';
 import type { KiwoomChart, KiwoomQuote } from './kiwoom';
 
@@ -48,7 +48,8 @@ export async function runAutoTick() {
     if(!quote)throw new Error('같은 종목의 현재가 대기');
     state=advanceAuto(previous,config,{source:chart.source,symbol:chart.symbol,timeframes:chart.timeframes,price:quote.price,observedAt:Date.parse(quote.timestamp)},Date.now(),!!row.enabled,!!row.close_requested);
   } catch {
-    state={...previous,lastChecked:Date.now(),stage:'DATA_WAIT',reason:'원본 시세 연결 대기 · 신규 체결 보류'};
+    const now=Date.now();
+    state=recordAutoDecision(previous,{...previous,lastChecked:now,stage:'DATA_WAIT',reason:'원본 시세 연결 대기 · 신규 체결 보류'},config,now);
   }
   // Compare-and-swap makes concurrent ticks/control requests idempotent. All fills,
   // cash, barriers and sequence milestones commit in the same atomic row update.

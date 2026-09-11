@@ -2071,6 +2071,9 @@ button:disabled {
 .auto-zone-grades ul{padding-left:18px;margin:8px 0;color:#b0c3d5;}
 
 /* Let chart controls occupy their actual height at every panel width. */
+.auto-decision{margin:10px 0;padding:12px;border:1px solid var(--line);border-radius:8px;overflow-wrap:anywhere;}
+.auto-decision summary{cursor:pointer;font-size:14px;line-height:1.6;}
+.auto-decision p{font-size:14px;line-height:1.7;margin:8px 0;}
 .center-stack,.chart-panel,.paper-chart-panel{min-width:0;}
 .chart-panel>.panel-title{height:auto;min-height:44px;display:grid;grid-template-columns:minmax(0,1fr);align-items:start;justify-content:stretch;gap:12px;padding:14px;}
 .chart-panel>.panel-title>span{font-size:.875rem;line-height:1.5;overflow-wrap:anywhere;}
