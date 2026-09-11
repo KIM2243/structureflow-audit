@@ -496,8 +496,15 @@ function detectLiquidity(structure: Pivot[], currentAtr: number, data: Candle[])
 }
 
 export function analyze(data: Candle[]): Analysis {
-  if (data.length < 20)
-    throw new Error('분석에는 최소 20개 캔들이 필요합니다.');
+  if (data.length < 20) return {
+    confirmedRange:null,marketPhase:'데이터 부족 · 진입 대기',score:0,bias:'NEUTRAL',atr:0,
+    pivots:[],internalPivots:[],structureEvents:[],structureState:{swingTrend:'TRANSITION',internalTrend:'TRANSITION'},
+    volumeStats:{current:0,average20:0,ratio:0},poc:0,vah:0,val:0,hvn:[],lvn:[],profile:[],
+    profileMin:0,profileStep:0,profileStart:0,entry:[0,0],stop:0,target:0,rr:0,snapshots:{},confidence:0,
+    orderBlocks:[],fairValueGaps:[],liquidity:[],
+    entryForecast:{status:'WAIT',side:'NEUTRAL',trigger:0,distancePct:0,zoneValid:false,locationConfirmed:false,reactionConfirmed:false,
+      reasons:[{label:'원본 데이터',state:'WAIT',detail:'최소 20개 원본 캔들이 필요합니다. 다른 시간대 데이터로 대신 진입하지 않습니다.'}]},
+  };
 
   const close = data.at(-1)!.close;
   const currentAtr = atr(data);
