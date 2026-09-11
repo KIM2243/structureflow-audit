@@ -2078,6 +2078,8 @@ button:disabled {
 .replay-slider{display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:14px;margin:12px 0;}
 .replay-slider input{flex:1;min-width:180px;accent-color:var(--green);}
 .decision-replay button[aria-pressed=true]{border-color:var(--green);color:var(--green);}
+.auto-engine-backtest{grid-column:1/-1;padding:20px;min-width:0;overflow-wrap:anywhere;}
+.auto-engine-backtest p{font-size:14px;line-height:1.7;}
 .auto-decision summary{cursor:pointer;font-size:14px;line-height:1.6;}
 .auto-decision p{font-size:14px;line-height:1.7;margin:8px 0;}
 .center-stack,.chart-panel,.paper-chart-panel{min-width:0;}
