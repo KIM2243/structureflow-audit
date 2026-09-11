@@ -75,6 +75,7 @@ import {
 import { mapMarketStructure } from '@/lib/market-structure';
 import { AutoPaperPanel } from '@/components/auto-paper-panel';
 import { AutoBacktestPanel } from '@/components/auto-backtest-panel';
+import { LectureCasebook } from '@/components/lecture-casebook';
 
 type Market = 'US' | 'KR';
 type AuthUser = { id: string; username: string; displayName: string; role: 'admin' | 'member' };
@@ -2550,12 +2551,13 @@ export default function Home(){
 }
 
 function GuidePage() {
-  const [guideTab, setGuideTab] = useState<'quick' | 'structure' | 'entry' | 'site'>('quick');
+  const [guideTab, setGuideTab] = useState<'quick' | 'structure' | 'entry' | 'site' | 'cases'>('quick');
   const guideTabs = [
     ['quick', '빠른 시작', '분석 순서와 체크리스트'],
     ['structure', '시장 구조', 'Swing·BOS·CHoCH'],
     ['entry', '가격·진입', '가격 영역과 실행 규칙'],
     ['site', '사이트 사용법', '기능별 실제 이용 순서'],
+    ['cases', '기준 사례집', '강의 장면과 판단 비교'],
   ] as const;
   const roadmap = [
     ['1D', '큰 방향', '상승·하락·전환 중 어디에 있는지 먼저 확인'],
@@ -2598,6 +2600,7 @@ function GuidePage() {
         </div>
       </header>
 
+      {guideTab === 'cases' && <div id="guide-panel-cases" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-cases"><LectureCasebook/></div>}
       {guideTab === 'quick' && <div id="guide-panel-quick" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-quick">
       <section id="guide-flow" className="guide-section">
         <div className="guide-section-title"><span>01</span><div><h2>한 번에 보는 분석 순서</h2><p>아래에서 위로 되돌아가지 말고 왼쪽부터 차례대로 확인합니다.</p></div></div>
