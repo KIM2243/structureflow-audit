@@ -2575,7 +2575,7 @@ function GuidePage() {
   return (
     <section className="guide-page">
       <header className="guide-hero">
-        <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE</div>
+        <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE · 2026.09.11 업데이트</div>
         <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
         <p>4시간 구역 접촉에서 출발해 15분과 1분의 전환·재접촉을 차례대로 확인합니다.</p>
         <p>강의 주요 장면에서 확인한 원칙을 보수적으로 구현했습니다. 전체 강의의 모든 예외를 재현한 인증된 전략은 아니며, 아래의 시스템 규칙은 강의 원문과 구분합니다.</p>
@@ -2615,10 +2615,12 @@ function GuidePage() {
         <div className="guide-section-title"><span>02</span><div><h2>주문 전 30초 체크리스트</h2><p>하나라도 설명할 수 없다면 대기합니다.</p></div></div>
         <div className="guide-checklist">
           {[
-            '1D와 4H 중 실제로 따를 방향을 말할 수 있는가?',
+            '1D·4H 방향과 1H 내부 구조가 진입 방향에 맞는가?',
             '현재 스윙이 BOS로 확정된 구조인지 확인했는가?',
             '15m 진입 구간과 무효화 가격을 확인했는가?',
             '1m에서 반대 구조가 아니라 진입 방향 트리거가 나왔는가?',
+            'H4·15m·1m 구역이 모두 A/B등급이며 접촉·전환·재접촉 순서가 맞는가?',
+            '부분청산과 비용을 반영한 최종 가중 목표가 순 2R 이상인가?',
             '손절 기준으로 계산된 수량이 감당 가능한가?',
           ].map((item) => <div key={item}><CheckCircle2 size={17} /><span>{item}</span></div>)}
         </div>
@@ -2660,8 +2662,9 @@ function GuidePage() {
           <dl>
             <div><dt>상단 진입·손절·목표</dt><dd><b>1m 정제</b><span>실제 실행 계획</span></dd></div>
             <div><dt>1D·4H·1H 차트</dt><dd><b>방향 참고</b><span>진입 가격선 없음</span></dd></div>
-            <div><dt>11m 차트</dt><dd><b>가격 계획</b><span>진입·무효화·목표 표시</span></dd></div>
-            <div><dt>1m 차트</dt><dd><b>체결 확인</b><span>구조 반응과 트리거 확인</span></dd></div>
+            <div><dt>15m 차트</dt><dd><b>기원 구역</b><span>상위 접촉 이후 전환·재접촉 확인</span></dd></div>
+            <div><dt>5m 차트</dt><dd><b>보조 확인</b><span>1분 진입 조건을 대신하지 않음</span></dd></div>
+            <div><dt>1m 차트</dt><dd><b>진입 정제</b><span>완료 봉의 전환·재접촉 확인</span></dd></div>
           </dl>
         </aside>
       </section>
@@ -2669,16 +2672,33 @@ function GuidePage() {
       <section id="guide-entry" className="guide-section">
         <div className="guide-section-title"><span>02</span><div><h2>진입은 가격 도달만으로 끝나지 않습니다</h2><p>StructureFlow의 진입 구간은 주문 명령이 아니라 관찰을 시작할 위치입니다.</p></div></div>
         <div className="guide-entry-flow">
-          <article><span>1</span><strong>방향 정렬</strong><p>4H 방향과 1H·15m 구조가 충돌하지 않는지 확인</p></article>
-          <article><span>2</span><strong>15m 구간 도달</strong><p>계산된 진입 영역에 가격이 들어오는지 대기</p></article>
-          <article><span>3</span><strong>1m 전환·재접촉 확인</strong><p>CHOCH/BOS와 거래량 반응으로 실제 방어 여부 확인</p></article>
-          <article><span>4</span><strong>손절 먼저 확정</strong><p>무효화 가격과 허용 위험에 맞춰 수량 계산</p></article>
+          <article><span>1</span><strong>4H 구역 접촉</strong><p>롱은 상승·Discount 수요, 숏은 하락·Premium 공급 구역의 실제 접촉을 기다립니다.</p></article>
+          <article><span>2</span><strong>15m 전환·재접촉</strong><p>4H 접촉 이후 CHoCH 또는 후속 BOS를 확인하고, 4H 안에 포함된 15분 기원 구역으로 돌아오는지 봅니다.</p></article>
+          <article><span>3</span><strong>1m 전환·재접촉</strong><p>15분 재접촉 이후 완료된 1분봉의 전환과 정제 구역 재접촉을 확인합니다. 1분 구역은 15분 구역 안에 있어야 합니다.</p></article>
+          <article><span>4</span><strong>등급·위험 검증</strong><p>1H 내부 방향의 동행, 세 구역의 A/B등급, 비용·부분청산 반영 순 2R과 허용 위험에 맞는 수량을 확인합니다.</p></article>
         </div>
         <div className="guide-note"><CircleAlert size={18} /><p><strong>눌림이 오지 않으면 거래하지 않는 전략입니다.</strong> 강한 추세의 돌파·재시험 진입은 별도의 시나리오로 구분해야 하며, 현재 기본 진입 구간과 섞지 않습니다.</p></div>
         <div className="guide-concept-stack">
           <article><b>강의 원칙 → 시스템의 구체적인 규칙</b><p>구역 경계는 기원 봉의 꼬리~몸통, H4는 유리한 반범위로 제한합니다. 자동 v2의 손절 완충 0.1%, 위험 0.5%, 1R 50% 청산, A/B등급, 부분청산 반영 최소 순 2R은 실험 설정입니다. 차트의 단일 시간대 참고 분석과 자동 체결 기록을 구분합니다.</p></article>
           <article><b>4H → 15m → 1m</b><p>4시간 수요·공급 접촉, 이후 15분 전환·재접촉, 이후 1분 전환·재접촉 순서입니다. PP 실험은 1시간 내부 방향도 확인합니다. 1분 원본이 없으면 대기합니다.</p></article>
           <article><b>숫자를 읽는 법</b><p>목표는 반대편 약한 스윙 극점 후보입니다. 영역이 없거나 2R 미만이면 보류합니다. 조건 충족 점수는 체크리스트 집계이지 승률이 아닙니다. 구간 안의 가격과 접촉 이후 새 구조 반응까지 확인해야 최종 준비 상태입니다.</p></article>
+        </div>
+      </section>
+      <section className="guide-section">
+        <div className="guide-section-title"><span>03</span><div><h2>수요·공급 구역 등급 읽기</h2><p>등급은 구조와 접촉 상태를 정리한 실험 점수이며 승률이 아닙니다.</p></div></div>
+        <div className="guide-concept-stack">
+          <article><b>배점과 A / B / C</b><p>확정 구조 돌파, 상위 범위의 유리한 반구간, 구역 폭 1.5배 이상 종가 이탈, 확정 후 재접촉 없음, 재접촉 1회 이하에 각각 1점입니다. 하위 정제 구역은 상위 구역 안에 포함되면 1점을 더합니다. A는 4점 이상, B는 3점, C는 2점 이하입니다.</p></article>
+          <article><b>접촉 횟수와 평가 근거</b><p>구역에 연속으로 겹치는 봉은 한 번의 접촉으로 셉니다. 이탈 강도는 구역 확정 시점의 최근 완료 봉 3개로 평가합니다. 차트의 ‘수요·공급 등급’과 ‘평가 근거’를 펼쳐 확인하세요. 자동 진입은 H4·15m·1m 중 하나라도 C등급이면 대기합니다.</p></article>
+        </div>
+      </section>
+      <section className="guide-section">
+        <div className="guide-section-title"><span>04</span><div><h2>롱·숏과 부분청산 관리</h2><p>자동 v2에 적용되는 규칙입니다. R은 최초 거래의 위험금액을 기준으로 읽습니다.</p></div></div>
+        <div className="guide-concept-stack">
+          <article><b>롱과 숏의 반대 방향</b><p>롱은 매수 진입 후 매도로 청산하며 H4 약한 고점이 목표 후보입니다. 숏은 매도 진입 후 매수로 청산하며 H4 약한 저점이 목표 후보입니다. 숏도 진입 명목금액 전액을 예약하며, 매도 대금을 추가 매수 자금으로 재사용하지 않습니다.</p></article>
+          <article><b>순 1R에서 절반 청산</b><p>수수료·슬리피지 차감 후 1R에 최초 수량의 절반을 정수 내림하여 청산합니다. 1주는 부분청산을 생략합니다. 잔여 수량은 기존 손절과 최종 목표로 관리하며 손절을 자동으로 본전으로 옮기지 않습니다.</p></article>
+          <article><b>부분청산을 반영한 순 2R</b><p>절반을 순 1R, 나머지를 순 3R에 청산하면 가중 목표는 순 2R입니다. 자동 v2는 이 가중 목표가 2R 이상일 때만 진입합니다. 실제 체결 비용과 정수 수량에 따라 필요한 최종 목표는 달라집니다.</p></article>
+          <article><b>체결과 통계 확인</b><p>같은 완료 봉에서 손절과 목표·부분청산 가격에 모두 닿으면 손절을 먼저 적용합니다. 갭 손절은 더 불리한 시가로 계산합니다. 부분청산 손익은 실현손익에 반영하되, 거래 수·승률·평균 R은 잔여 수량까지 모두 청산한 뒤 한 거래로 집계합니다.</p></article>
+          <article><b>실험의 범위</b><p>등급 배점·위험 0.5%·손절 완충 0.1%·부분청산 비율은 강의의 고정 공식이 아닌 검증용 설정입니다. 실계좌 주문은 전송하지 않으며 숏의 대차 가능 여부·대차료·세금·호가 대기열·실제 부분체결은 반영하지 않습니다.</p></article>
         </div>
       </section>
       </div>}
@@ -2692,8 +2712,8 @@ function GuidePage() {
             ['1', '관심종목 등록', '미국·한국 탭을 먼저 고른 뒤 빈 카드의 ‘종목을 추가해 주세요’를 누릅니다. 이름이나 종목코드로 검색해 국가별 최대 3개를 저장하세요.'],
             ['2', '분석 데이터 불러오기', 'LIVE WATCH 카드에서 종목을 고르고 데이터 불러오기를 누릅니다. 다시 방문하면 마지막 차트를 복원하며, 관심종목 가격은 5초마다 갱신됩니다.'],
             ['3', '상단 결론 확인', '점수와 LONG·SHORT·관망 상태를 먼저 읽고, 상단 가격은 1분 분석의 참고 계획입니다. 자동 실험의 확정 손절·목표는 모의투자 패널에서 확인합니다.'],
-            ['4', '시간대 순서대로 검증', '왼쪽 패널을 1D → 4H → 1H → 15m → 1m 순서로 누릅니다. 상위 봉은 방향, 15분봉은 가격, 1분봉은 진입 정제입니다. 5분봉은 보조입니다.'],
-            ['5', '차트 근거 켜고 끄기', '차트 위의 스윙구조, CHOCH, HH·HL, Premium/Discount, 내부구조, 거래량, VP, OB/FVG, 유동성 버튼으로 필요한 근거만 남깁니다.'],
+            ['4', '시간대 순서대로 검증', '화면의 시간대는 1D → 4H → 1H → 15m → 5m → 1m 순서입니다. 5분봉은 움직임을 보조 확인하고, 필수 진입 정제는 1분봉에서 수행합니다.'],
+            ['5', '차트 근거 켜고 끄기', '1 스윙구조·HH·HL·LH·LL → 2 Premium/Discount → 3 수요·공급 등급 → 4 유동성 → 5 내부구조 → 6 CHoCH → 7 진입·손절·목표 순서로 확인합니다. OB/FVG·거래량·VP는 보조입니다. 버튼은 화면 폭에 맞춰 줄바꿈되며 차트 정보와 확대·축소 도구도 아래로 배치됩니다.'],
             ['6', '실행 계획으로 최종 확인', '오른쪽 실행 계획에서 각 시간대가 충족·대기·차단 중인지 확인합니다. 가격이 구간에 닿았다는 이유만으로 주문하지 않습니다.'],
           ].map(([step, title, detail]) => (
             <article key={step} className="guide-use-step"><span>{step}</span><div><strong>{title}</strong><p>{detail}</p></div></article>
@@ -2708,6 +2728,8 @@ function GuidePage() {
             ['BOS / CHoCH', 'CHOCH · 스윙구조', '추세 지속 확인인가, 첫 전환 경고인가?'],
             ['Internal Structure', '내부구조', '큰 스윙인가, 아직 범위 안의 작은 움직임인가?'],
             ['Premium / Discount', 'Premium/Discount', '비싼 곳을 추격하는가, 유리한 영역의 반응을 기다리는가?'],
+            ['수요·공급 구역', '수요·공급 등급 · 평가 근거', '진입 방향에 맞는 구역인가? 반복 접촉과 이탈 강도는 어떠한가?'],
+            ['실행과 거래 관리', '진입·손절·목표 · 자동 모의투자', '참고 후보와 실제 가상 체결을 구분하고 부분청산 이후 잔여 수량을 확인했는가?'],
             ['VAH / POC / VAL', 'VP', '현재 가격은 Value Area의 위·안·아래 중 어디인가?'],
             ['다중 시간대 분석', '왼쪽 시간대 구조 · 실행 계획', '1D 방향부터 1m 트리거까지 서로 충돌하지 않는가?'],
           ].map(([concept, location, question]) => (
@@ -2719,16 +2741,21 @@ function GuidePage() {
           <article className="guide-walkthrough">
             <h3>롱 시나리오 예시</h3>
             <ol>
-              <li><b>1D·4H</b><span>상승 구조와 거래할 방향을 확인</span></li>
+              <li><b>1D·4H</b><span>상승 방향과 Discount 수요 구역의 실제 접촉 확인</span></li>
               <li><b>1H</b><span>상위 방향을 거스르는 구조 변화가 없는지 확인</span></li>
-              <li><b>15m</b><span>BOS 기원 영역·Discount와 무효화 가격 확인 (VAL은 보조)</span></li>
-              <li><b>1m</b><span>상승 CHoCH/BOS와 거래량 반응이 나온 뒤 실행</span></li>
-              <li><b>모의투자</b><span>같은 종목을 불러와 손절 기준 수량으로 먼저 연습</span></li>
+              <li><b>15m</b><span>4H 접촉 이후 상승 전환과 포함된 기원 구역 재접촉 확인</span></li>
+              <li><b>1m</b><span>15분 재접촉 이후 상승 전환·재접촉, A/B등급과 비용 반영 목표 확인</span></li>
+              <li><b>모의투자</b><span>진입 기록 → 순 1R 부분청산 → 잔여분 손절 또는 목표 청산 확인</span></li>
             </ol>
+            <h3>숏 시나리오 예시</h3>
+            <p>하락 방향의 H4 Premium 공급 구역 접촉 → 15분 하락 전환·재접촉 → 1분 하락 전환·재접촉을 확인합니다. 같은 등급·위험 조건을 통과하면 매도 진입하고, 하락 시 매수로 부분청산·최종 청산합니다.</p>
           </article>
           <article className="guide-practice-tools">
             <h3>모의투자와 백테스트 활용법</h3>
             <div><b>모의투자</b><p>분석 대시보드와 별도의 종목·차트를 불러와 가상 주문을 연습합니다. 다른 메뉴를 보는 동안에도 불러온 종목의 5초 시세 조회는 계속됩니다.</p></div>
+            <div><b>자동 모의투자 v2</b><p>새 실험은 롱·숏·등급·부분청산 규칙을 사용합니다. 기존 v1 실험은 기존 규칙과 기록을 유지합니다. 자동 패널에서 대기 사유, 추적 구역의 등급, 보유 수량, 진입·부분청산·청산 기록을 확인하고 CSV로 비교하세요. 버전이 다른 결과를 합쳐 해석하지 않습니다.</p></div>
+            <div><b>1분봉 공급과 대기 상태</b><p>원본 1분봉만 사용하며 5분봉을 나누어 만들지 않습니다. 차트는 Yahoo 원본 보조 시세를 표시할 수 있지만 자동 체결은 키움 원본만 허용합니다. 데이터가 부족하거나 지연되면 대기합니다. 차트가 보이는 동안 60초마다 갱신하며 선택한 시간대를 유지합니다.</p></div>
+            <div><b>차트 후보와 자동 체결</b><p>차트 후보는 완료 봉으로 재구성한 검토 결과입니다. 자동 실험은 시작 이후 실제로 관측한 접촉 순서로 검증하며 과거 후보를 소급 체결하지 않습니다. 페이지가 열렸다는 사실만으로 백그라운드 실행을 판단하지 말고, 자동 패널의 최근 관측·상태 기록을 확인하세요.</p></div>
             <div><b>백테스트</b><p>현재 백테스트는 기존 고저가 돌파+20MA 전략입니다. 이번 구조 영역 눌림·다중 시간대 진입과 다른 전략이므로 그 승률을 대시보드 전략의 성과로 해석하지 마세요. 동기화된 다중 시간대 성과 검증은 별도 작업이 필요합니다.</p></div>
           </article>
         </div>
