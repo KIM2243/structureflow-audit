@@ -2400,7 +2400,7 @@ function PaperTrading({
             <strong>{current.code} · {current.name}</strong>
           </div>
           <div className="paper-timeframes" aria-label="모의투자 차트 시간대">
-            {(['1D', '4H', '1H', '15m', '1m', '5m'] as Timeframe[]).map((item) => (
+            {(['1D', '4H', '1H', '15m', '5m', '1m'] as Timeframe[]).map((item) => (
               <button
                 type="button"
                 key={item}
@@ -3410,7 +3410,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     );
   };
 
-  const timeframeRows = (['1D', '4H', '1H', '15m', '1m', '5m'] as Timeframe[]).map(
+  const timeframeRows = (['1D', '4H', '1H', '15m', '5m', '1m'] as Timeframe[]).map(
     (name) => [name, timeframeSnapshots[name]] as [Timeframe, Snapshot],
   );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
