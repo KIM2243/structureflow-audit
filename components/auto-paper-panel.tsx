@@ -50,7 +50,7 @@ export function AutoPaperPanel({market,symbol,exchange,name,active}:Props) {
       <section className="auto-health" aria-label="운영·데이터 상태">
         <h3>운영·데이터 상태</h3><p>서버 신호: {runnerReady?'최근 3분 이내 응답':'없음·지연 또는 조회 실패'} · 마지막 신호 {time(heartbeat)}</p>
         <p>종목 마지막 처리 {time(s.lastChecked)} · 마지막 정상 원본 {time(s.lastFreshAt||0)}</p>
-        {s.health?<><p>데이터 검사 {time(s.health.at)} · 당시 현재가 지연 {s.health.quoteAgeMs===null?'미확인':`${(s.health.quoteAgeMs/1000).toFixed(0)}초`} · 당시 1분봉 시작 이후 {s.health.m1AgeMs===null?'미확인':`${(s.health.m1AgeMs/1000).toFixed(0)}초`}</p>
+        {s.health?<><p>데이터 검사 {time(s.health.at)} · 시세 시각 차이 {s.health.quoteAgeMs===null?'미확인':`${(Math.abs(s.health.quoteAgeMs)/1000).toFixed(3)}초 ${s.health.quoteAgeMs<0?'앞섬':'경과'}`} · 당시 1분봉 시작 이후 {s.health.m1AgeMs===null?'미확인':`${(s.health.m1AgeMs/1000).toFixed(0)}초`}</p>
           {s.health.issues.length?s.health.issues.map(i=><p key={i.code} className={i.level==='block'?'negative':''}>{i.level==='block'?'체결 보류':'확인 필요'} · {i.message}</p>):<p>마지막 검사에서 데이터 이상 미검출{Date.now()-s.health.at>180000?' · 오래된 검사이므로 현재 정상 여부는 미확인':''}</p>}</>:<p>다음 자동 확인부터 상세 데이터 검사를 표시합니다.</p>}
         {s.decisions?.[0]?.replayError&&<p className="negative">차트 보관: {s.decisions[0].replayError}</p>}
         <p>봉 간격은 무거래·거래정지·휴장으로도 벌어질 수 있습니다. 거래소 달력과 대조한 장애 확정은 아닙니다. 최근 간격 이상은 신규 진입을 보류하지만, 유효한 시세가 있으면 기존 보유분 관리는 계속합니다. 원본 시세 자체가 잘못되거나 지연되면 청산 계산도 대기합니다.</p>

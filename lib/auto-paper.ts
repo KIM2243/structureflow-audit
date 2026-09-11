@@ -31,6 +31,8 @@ export type AutoState = {
 };
 export type AutoFeed = { source: string; symbol: string; timeframes: { '1m'?: Candle[]; '15m': Candle[]; '1H': Candle[]; '4H': Candle[] }; price: number; observedAt: number };
 export type AutoHealth={at:number;quoteAgeMs:number|null;m1AgeMs:number|null;issues:{code:string;level:'block'|'warning';message:string}[]};
+// Bridge and Worker clocks are independent; retain raw times but allow bounded skew.
+export const QUOTE_CLOCK_SKEW_MS=2000;
 export function inspectAutoFeed(feed:AutoFeed,config:AutoConfig,now:number,lastQuoteAt?:number):AutoHealth {
   const issues:AutoHealth['issues']=[],add=(code:string,message:string,level:'block'|'warning'='block')=>issues.push({code,message,level});
   if(feed.symbol!==config.symbol)add('SYMBOL_MISMATCH','요청 종목과 수신 종목 불일치');
@@ -42,7 +44,9 @@ export function inspectAutoFeed(feed:AutoFeed,config:AutoConfig,now:number,lastQ
   }
   const one=feed.timeframes['1m']||[],latest=Date.parse(one.at(-1)?.date||'');
   const quoteAgeMs=Number.isFinite(feed.observedAt)?now-feed.observedAt:null,m1AgeMs=Number.isFinite(latest)?now-latest:null;
-  if(quoteAgeMs===null||quoteAgeMs<0)add('QUOTE_TIME_INVALID','시세 시각 오류 또는 미래 시각');
+  if(quoteAgeMs===null)add('QUOTE_TIME_INVALID','시세 시각 누락 또는 형식 오류');
+  else if(quoteAgeMs < -QUOTE_CLOCK_SKEW_MS)add('QUOTE_TIME_INVALID',`시세 시각이 서버보다 ${(-quoteAgeMs/1000).toFixed(3)}초 앞섬 · 허용 오차 2초 초과`);
+  else if(quoteAgeMs<0)add('QUOTE_CLOCK_SKEW',`중계 서버 시계가 ${(-quoteAgeMs/1000).toFixed(3)}초 앞섬 · 허용 범위 내`,'warning');
   else if(quoteAgeMs>30000)add('QUOTE_STALE','현재가 30초 초과 지연 · 장 종료 여부 별도 확인');
   if(m1AgeMs===null||m1AgeMs>120000)add('M1_STALE','1분봉 2분 초과 지연 또는 없음 · 장 종료 여부 별도 확인');
   if(!Number.isFinite(feed.price)||feed.price<=0)add('PRICE_INVALID','유효하지 않은 현재가');
