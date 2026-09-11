@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Play, Pause, Download, Activity } from 'lucide-react';
 import { autoEquity, AUTO_VERSION, type AutoConfig, type AutoState } from '@/lib/auto-paper';
+import { DecisionReplayPanel } from './decision-replay';
 type Run={id:string;instrument:string;config:AutoConfig;state:AutoState;enabled:boolean;closeRequested:boolean};
 type Props={market:'US'|'KR';symbol:string;exchange?:'NA'|'ND'|'NY';name:string;active:boolean};
 const fillLabel=(f:AutoState['fills'][number])=>f.action?`${f.direction==='SHORT'?'숏':'롱'} ${f.action==='ENTRY'?'진입':f.action==='PARTIAL'?'부분청산':'청산'}`:f.side==='BUY'?'매수':'매도';
@@ -23,6 +24,7 @@ function ExecutionChart({state:s}:{state:AutoState}) {
 export function AutoPaperPanel({market,symbol,exchange,name,active}:Props) {
   const [runs,setRuns]=useState<Run[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[selected,setSelected]=useState('');
   const [runnerReady,setRunnerReady]=useState(false);
+  const [replay,setReplay]=useState<{runId:string;at:number}|null>(null);
   const load=useCallback(async()=>{try{const r=await fetch('/api/paper/auto',{cache:'no-store'});const p=await r.json() as {runs:Run[];error?:string;runtime?:{ready:boolean}};if(!r.ok)throw new Error(p.error);setRuns(p.runs);setRunnerReady(!!p.runtime?.ready);setError('');}catch{setError('자동 실험 계좌를 불러오지 못했습니다.');}},[]);
   useEffect(()=>{if(!active)return;void load();const id=setInterval(()=>void load(),10000);return()=>clearInterval(id);},[active,load]);
   async function action(kind:string,id?:string){setBusy(true);setError('');try{const r=await fetch('/api/paper/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:kind,id,market,symbol,exchange:exchange||'ND'})});const p=await r.json() as {runs:Run[];error?:string};if(!r.ok)throw new Error(p.error);setRuns(p.runs);if(kind==='start'){const match=p.runs.find((x:Run)=>x.config.market===market&&x.config.symbol===symbol);if(match)setSelected(match.id);else setError('실험은 계정당 최대 6종목입니다.');}}catch(e){setError(e instanceof Error?e.message:'요청 실패');}finally{setBusy(false);}}
@@ -50,12 +52,14 @@ export function AutoPaperPanel({market,symbol,exchange,name,active}:Props) {
       <div className="auto-paper-levels">{s.setup?<><span>4시간 구역 {money(s.setup.zone.low)}–{money(s.setup.zone.high)}</span><span>15분 구역 {s.setup.m15?`${money(s.setup.m15.low)}–${money(s.setup.m15.high)}`:'전환 대기'}</span><span>1분 구역 {s.setup.m1?`${money(s.setup.m1.low)}–${money(s.setup.m1.high)}`:'전환 대기'}</span></>:<span>확정된 4시간 수요·공급 구역을 찾고 있습니다.</span>}</div>
       <div className="auto-zone-grades">{s.setup&&[['4H',s.setup.zone],['M15',s.setup.m15],['M1',s.setup.m1]].map(([label,z])=>{const zone=z as NonNullable<AutoState['setup']>['zone']|undefined;return zone?.quality?<details key={String(label)}><summary>{String(label)} {zone.quality.grade}등급 · {zone.quality.score}/{zone.quality.maximum}</summary><ul>{zone.quality.reasons.map(r=><li key={r}>{r}</li>)}</ul></details>:null;})}</div>
       <ExecutionChart state={s}/>
+      {replay&&replay.runId===run.id&&<DecisionReplayPanel key={`${replay.runId}-${replay.at}`} runId={replay.runId} at={replay.at} onClose={()=>setReplay(null)}/>}
       <div className="paper-table-scroll"><table><thead><tr><th>시각</th><th>매수·매도</th><th>체결가</th><th>수량</th><th>비용 차감 손익</th><th>근거</th></tr></thead><tbody>{s.fills.slice(0,20).map(f=><tr key={f.id}><td>{time(f.at)}</td><td>{fillLabel(f)}</td><td>{money(f.price)}</td><td>{f.quantity}주</td><td>{(f.action?f.action!=='ENTRY':f.side==='SELL')?`${money(f.pnl)} (${f.r.toFixed(2)}R)`:'—'}</td><td>{f.reason}</td></tr>)}</tbody></table>{!s.fills.length&&<p className="auto-paper-note">아직 자동 체결이 없습니다. 조건을 충족할 때만 주문합니다.</p>}</div>
       <details><summary>진입·대기·차단 판단 기록 ({s.decisions?.length||0}건)</summary>
         <p className="auto-paper-note">단계·사유·설정 변경 및 체결 시 기록하고, 같은 상태는 분당 한 번 표본으로 남깁니다. 최근 200건만 보관하며 오래된 기록은 삭제됩니다. 중요한 기록은 내려받으세요. 업데이트 이전 판단은 소급 복원하지 않습니다.</p>
         <button disabled={!s.decisions?.length} onClick={downloadDecisions}><Download size={16}/> 판단 근거 내려받기 (JSON)</button>
         {(s.decisions||[]).map((a,i)=><details key={`${a.at}-${i}`} className="auto-decision"><summary>{time(a.at)} · {a.fills.length?'체결 · ':''}{a.reason}</summary>
           <p>단계 {a.stage} · 모델 {a.model} · 종목 {a.symbol}</p>
+          {a.replayKey?<button onClick={()=>setReplay({runId:run.id,at:a.at})}>판단 당시 차트 재생</button>:<p>{a.replayError||'저장된 차트 없음 · 업데이트 이후 정상 시세 판단부터 재생할 수 있습니다.'}</p>}
           <p>관측 가격 {a.price===null?'없음':money(a.price)} · 시세 시각 {a.observedAt?time(a.observedAt):'없음'} · 출처 {a.source||'연결 실패'}</p>
           <p>위험 {a.config.riskPct}% · 편도 수수료 {a.config.feeBps}bp · 슬리피지 {a.config.slippageBps}bp</p>
           {a.bars.map(b=><p key={b.timeframe}>{b.timeframe} 수신 {b.received}봉 / 완료 {b.completed}봉 · 마지막 완료 봉 시작 {b.lastCompleted?time(Date.parse(b.lastCompleted)):'없음'}</p>)}

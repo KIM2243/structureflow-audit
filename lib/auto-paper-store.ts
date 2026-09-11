@@ -1,10 +1,18 @@
 import { env } from 'cloudflare:workers';
-import { advanceAuto, newAutoState, recordAutoDecision, type AutoConfig, type AutoState } from './auto-paper';
+import { advanceAuto, newAutoState, recordAutoDecision, type AutoConfig, type AutoState, type AutoFeed } from './auto-paper';
+import { makeDecisionReplay } from './decision-replay';
 import { fetchFromKiwoomBridge } from './bridge';
 import type { KiwoomChart, KiwoomQuote } from './kiwoom';
 
 type Row={id:string;user_id:string;instrument:string;config:string;state:string;enabled:number;has_position:number;close_requested:number;revision:number;checked_at:number};
 const view=(r:Row)=>({id:r.id,instrument:r.instrument,config:JSON.parse(r.config) as AutoConfig,state:JSON.parse(r.state) as AutoState,enabled:!!r.enabled,closeRequested:!!r.close_requested,revision:r.revision});
+export async function readDecisionReplay(userId:string,runId:string,at:number) {
+  const row=await env.DB.prepare('SELECT * FROM auto_paper_runs WHERE id=? AND user_id=?').bind(runId,userId).first<Row>();
+  const decision=row?(JSON.parse(row.state) as AutoState).decisions?.find(d=>d.at===at):undefined;
+  if(!decision?.replayKey)return null;
+  const object=await env.FILES.get(decision.replayKey);
+  return object?object.json():null;
+}
 export async function autoRuntime() {
   const row=await env.DB.prepare("SELECT heartbeat_at FROM auto_paper_runtime WHERE id='runner'").first<{heartbeat_at:number}>();
   return {ready:!!row && Date.now()-row.heartbeat_at<180000,heartbeatAt:row?.heartbeat_at||0};
@@ -34,7 +42,7 @@ export async function runAutoTick() {
   const row=await env.DB.prepare(`SELECT r.* FROM auto_paper_runs r JOIN users u ON u.id=r.user_id WHERE u.status='active' AND (r.enabled=1 OR r.has_position=1) AND r.checked_at<? ORDER BY r.checked_at LIMIT 1`).bind(Date.now()-15000).first<Row>();
   if(!row)return {checked:0};
   const config=JSON.parse(row.config) as AutoConfig, previous=JSON.parse(row.state) as AutoState;
-  let state:AutoState;
+  let state:AutoState, feed:AutoFeed|undefined;
   try {
     const query=new URLSearchParams({market:config.market,symbol:config.symbol,exchange:config.exchange,auto:'1'});
     const response=await fetchFromKiwoomBridge('/api/market',query);
@@ -46,13 +54,26 @@ export async function runAutoTick() {
     const q=await qres.json() as {quotes:KiwoomQuote[]};
     const quote=q.quotes.find(x=>x.key===key && x.status==='ok');
     if(!quote)throw new Error('같은 종목의 현재가 대기');
-    state=advanceAuto(previous,config,{source:chart.source,symbol:chart.symbol,timeframes:chart.timeframes,price:quote.price,observedAt:Date.parse(quote.timestamp)},Date.now(),!!row.enabled,!!row.close_requested);
+    feed={source:chart.source,symbol:chart.symbol,timeframes:chart.timeframes,price:quote.price,observedAt:Date.parse(quote.timestamp)};
+    state=advanceAuto(previous,config,feed,Date.now(),!!row.enabled,!!row.close_requested);
   } catch {
     const now=Date.now();
     state=recordAutoDecision(previous,{...previous,lastChecked:now,stage:'DATA_WAIT',reason:'원본 시세 연결 대기 · 신규 체결 보류'},config,now);
   }
+  let savedKey:string|undefined;
+  const latest=state.decisions?.[0];
+  if(feed && latest && latest.at!==previous.decisions?.[0]?.at){
+    const snapshot=makeDecisionReplay(latest,feed);
+    if(snapshot){
+      const key=`decision-replays/${row.user_id}/${row.id}/${crypto.randomUUID()}.json`;
+      try {await env.FILES.put(key,JSON.stringify(snapshot),{httpMetadata:{contentType:'application/json'}});latest.replayKey=key;savedKey=key;}
+      catch {latest.replayError='당시 차트 저장 실패 · 판단 기록은 유지됩니다';}
+    }
+  }
   // Compare-and-swap makes concurrent ticks/control requests idempotent. All fills,
   // cash, barriers and sequence milestones commit in the same atomic row update.
   const result=await env.DB.prepare('UPDATE auto_paper_runs SET state=?,has_position=?,checked_at=?,revision=revision+1 WHERE id=? AND revision=?').bind(JSON.stringify(state),state.position?1:0,Date.now(),row.id,row.revision).run();
+  const retired=result.meta.changes?(previous.decisions||[]).filter(d=>d.replayKey&&!state.decisions?.some(current=>current.replayKey===d.replayKey)).map(d=>d.replayKey!):savedKey?[savedKey]:[];
+  if(retired.length)try {await env.FILES.delete(retired);}catch {console.error('Decision replay cleanup failed');}
   return {checked:result.meta.changes?1:0};
 }

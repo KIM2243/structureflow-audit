@@ -9,6 +9,7 @@ export type Zone = { low: number; high: number; at: number; id: string; quality?
 export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number };
 export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
 export type AutoDecision = {
+  replayKey?: string; replayError?: string;
   at: number; model: string; stage: string; reason: string; symbol: string;
   source: string; observedAt: number | null; price: number | null;
   config: AutoConfig; setup?: AutoState['setup']; position?: AutoState['position'];

@@ -2072,6 +2072,12 @@ button:disabled {
 
 /* Let chart controls occupy their actual height at every panel width. */
 .auto-decision{margin:10px 0;padding:12px;border:1px solid var(--line);border-radius:8px;overflow-wrap:anywhere;}
+.decision-replay{margin:16px 0;padding:16px;border:1px solid #367967;border-radius:12px;min-width:0;overflow-wrap:anywhere;}
+.decision-replay p{font-size:14px;line-height:1.6;}
+.decision-replay svg{display:block;width:100%;min-width:620px;}
+.replay-slider{display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:14px;margin:12px 0;}
+.replay-slider input{flex:1;min-width:180px;accent-color:var(--green);}
+.decision-replay button[aria-pressed=true]{border-color:var(--green);color:var(--green);}
 .auto-decision summary{cursor:pointer;font-size:14px;line-height:1.6;}
 .auto-decision p{font-size:14px;line-height:1.7;margin:8px 0;}
 .center-stack,.chart-panel,.paper-chart-panel{min-width:0;}
