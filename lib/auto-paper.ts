@@ -9,6 +9,7 @@ export type Zone = { low: number; high: number; at: number; id: string; quality?
 export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number };
 export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
 export type AutoDecision = {
+  health?: AutoHealth;
   replayKey?: string; replayError?: string;
   at: number; model: string; stage: string; reason: string; symbol: string;
   source: string; observedAt: number | null; price: number | null;
@@ -18,6 +19,7 @@ export type AutoDecision = {
   fills: AutoFill[];
 };
 export type AutoState = {
+  health?: AutoHealth; lastQuoteAt?: number;
   version: string; startedAt: number; cash: number; lastBar: number; lastChecked: number;
   stage: string; reason: string; source: string; mark: number; benchmarkStart: number;
   lastFreshAt?: number; chart?: Candle[];
@@ -28,6 +30,27 @@ export type AutoState = {
   closed: number; wins: number; netPnl: number; sumR: number; peak: number; maxDrawdown: number;
 };
 export type AutoFeed = { source: string; symbol: string; timeframes: { '1m'?: Candle[]; '15m': Candle[]; '1H': Candle[]; '4H': Candle[] }; price: number; observedAt: number };
+export type AutoHealth={at:number;quoteAgeMs:number|null;m1AgeMs:number|null;issues:{code:string;level:'block'|'warning';message:string}[]};
+export function inspectAutoFeed(feed:AutoFeed,config:AutoConfig,now:number,lastQuoteAt?:number):AutoHealth {
+  const issues:AutoHealth['issues']=[],add=(code:string,message:string,level:'block'|'warning'='block')=>issues.push({code,message,level});
+  if(feed.symbol!==config.symbol)add('SYMBOL_MISMATCH','요청 종목과 수신 종목 불일치');
+  if(!feed.source?.startsWith('Kiwoom REST API'))add('SOURCE_REJECTED','키움 원본이 아닌 데이터');
+  for(const frame of ['1m','15m','1H','4H'] as const){const bars=feed.timeframes[frame]||[];
+    if(bars.length<20)add(`MISSING_${frame}`,`${frame} 원본 봉 부족 (${bars.length}/20)`);
+    if(!validBars(bars))add(`INVALID_${frame}`,`${frame} OHLCV·시각 오류 또는 중복/역순 봉`);
+    if(bars.some(b=>Date.parse(b.date)>now))add(`FUTURE_${frame}`,`${frame} 미래 시각 봉 감지`);
+  }
+  const one=feed.timeframes['1m']||[],latest=Date.parse(one.at(-1)?.date||'');
+  const quoteAgeMs=Number.isFinite(feed.observedAt)?now-feed.observedAt:null,m1AgeMs=Number.isFinite(latest)?now-latest:null;
+  if(quoteAgeMs===null||quoteAgeMs<0)add('QUOTE_TIME_INVALID','시세 시각 오류 또는 미래 시각');
+  else if(quoteAgeMs>30000)add('QUOTE_STALE','현재가 30초 초과 지연 · 장 종료 여부 별도 확인');
+  if(m1AgeMs===null||m1AgeMs>120000)add('M1_STALE','1분봉 2분 초과 지연 또는 없음 · 장 종료 여부 별도 확인');
+  if(!Number.isFinite(feed.price)||feed.price<=0)add('PRICE_INVALID','유효하지 않은 현재가');
+  if(lastQuoteAt&&feed.observedAt<lastQuoteAt)add('QUOTE_REGRESSION','마지막 정상 시세보다 오래된 응답');
+  const recent=one.filter(b=>Date.parse(b.date)>=now-10*60000);
+  if(recent.some((b,i)=>i>0&&Date.parse(b.date)-Date.parse(recent[i-1].date)>60000))add('M1_GAP','최근 10분 내 1분봉 간격 누락 의심 · 무거래·거래정지 가능성 포함','warning');
+  return {at:now,quoteAgeMs,m1AgeMs,issues};
+}
 export function newAutoState(config: AutoConfig, now: number): AutoState {
   return { version: AUTO_VERSION, startedAt: now, cash: config.capital, lastBar: now, lastChecked: 0, stage: 'WAIT_CONTEXT', reason: '4시간 수요·공급 구역과 롱·숏 PP 조건 대기', source: '', mark: 0, benchmarkStart: 0, fills: [], audit: [], closed: 0, wins: 0, netPnl: 0, sumR: 0, peak: config.capital, maxDrawdown: 0 };
 }
@@ -146,7 +169,7 @@ export function recordAutoDecision(previous: AutoState, s: AutoState, config: Au
     const partial=s.version===AUTO_VERSION?Math.floor(terms.quantity/2):0;
     checks={insideM1:feed.price>=z.low&&feed.price<=z.high,afterM1:now>z.at,quantity:terms.quantity,stop,target:s.setup.target,netTargetR:terms.rr,weightedR:terms.quantity?(partial+(terms.quantity-partial)*terms.rr)/terms.quantity:0,h1Direction:internalDirection(closedBars(feed.timeframes['1H'],60,now))};
   }
-  const decision:AutoDecision={at:now,model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
+  const decision:AutoDecision={at:now,health:structuredClone(s.health),model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
   s.decisions=[decision,...(previous.decisions||[])].slice(0,200);
   return s;
 }
@@ -157,13 +180,10 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   const s=structuredClone(previous); s.lastChecked=now;
   const v2=s.version===AUTO_VERSION;
   const one=feed.timeframes['1m'] || [];
-  if(feed.symbol!==config.symbol || !feed.source.startsWith('Kiwoom REST API') || [one,feed.timeframes['15m'],feed.timeframes['1H'],feed.timeframes['4H']].some(b=>b.length<20 || !validBars(b))) {
-    status(s,now,'DATA_WAIT','동일 종목의 키움 1분·15분·1시간·4시간 원본 데이터 대기'); return s;
-  }
-  const latest=Date.parse(one.at(-1)!.date);
-  if(!Number.isFinite(feed.observedAt) || latest>now || now-latest>120_000 || now-feed.observedAt>30_000 || feed.observedAt>now || !Number.isFinite(feed.price) || feed.price<=0) {
-    status(s,now,'DATA_WAIT','장 마감 또는 지연 시세: 새 체결 보류'); return s;
-  }
+  s.health=inspectAutoFeed(feed,config,now,s.lastQuoteAt);
+  const blocked=s.health.issues.filter(i=>i.level==='block');
+  if(blocked.length){if(!s.position)delete s.setup;status(s,now,'DATA_WAIT',blocked.map(i=>i.message).join(' · '));return s;}
+  s.lastQuoteAt=feed.observedAt;
   if(!s.position && ((s.lastFreshAt && now-s.lastFreshAt>180000) || (s.source && s.source!==feed.source))) delete s.setup;
   s.lastFreshAt=now;s.chart=one.slice(-90);
   s.source=feed.source; s.mark=feed.price; if(!s.benchmarkStart)s.benchmarkStart=feed.price;
@@ -198,6 +218,7 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   s.lastBar=Math.max(s.lastBar,Date.parse(m1.at(-1)?.date||'')+60_000||0);
   if(s.position) { status(s,now,'HOLDING','보유 중 · 고정 손절·목표 및 4시간 구조 감시'); return markEquity(s); }
   if(!enabled || closeRequested) { status(s,now,'PAUSED','신규 진입 중지'); return markEquity(s); }
+  if(s.health.issues.some(i=>i.code==='M1_GAP')){delete s.setup;status(s,now,'DATA_GAP','최근 1분봉 간격 확인 대기 · 신규 진입 보류');return markEquity(s);}
   if(s.closed>=500) {status(s,now,'COMPLETE','500건 실험 완료 · 결과 검토 후 새 모델로 진행');return markEquity(s);}
   if(!context) { delete s.setup; status(s,now,'WAIT_CONTEXT','4시간 BOS와 확정 수요·공급 구역 대기'); return markEquity(s); }
   if(s.setup && s.setup.id!==context.zone.id) delete s.setup;

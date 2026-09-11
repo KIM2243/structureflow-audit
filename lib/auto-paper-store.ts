@@ -15,7 +15,8 @@ export async function readDecisionReplay(userId:string,runId:string,at:number) {
 }
 export async function autoRuntime() {
   const row=await env.DB.prepare("SELECT heartbeat_at FROM auto_paper_runtime WHERE id='runner'").first<{heartbeat_at:number}>();
-  return {ready:!!row && Date.now()-row.heartbeat_at<180000,heartbeatAt:row?.heartbeat_at||0};
+  const age=row?Date.now()-row.heartbeat_at:Infinity;
+  return {ready:!!row && age>=0 && age<180000,heartbeatAt:row?.heartbeat_at||0};
 }
 export async function listAutoRuns(userId:string) {
   const rows=await env.DB.prepare('SELECT * FROM auto_paper_runs WHERE user_id=? ORDER BY created_at').bind(userId).all<Row>();
@@ -58,7 +59,9 @@ export async function runAutoTick() {
     state=advanceAuto(previous,config,feed,Date.now(),!!row.enabled,!!row.close_requested);
   } catch {
     const now=Date.now();
-    state=recordAutoDecision(previous,{...previous,lastChecked:now,stage:'DATA_WAIT',reason:'원본 시세 연결 대기 · 신규 체결 보류'},config,now);
+    const waiting={...previous,lastChecked:now,stage:'DATA_WAIT',reason:'원본 시세 연결 대기 · 신규 체결 보류',health:{at:now,quoteAgeMs:null,m1AgeMs:null,issues:[{code:'FEED_UNAVAILABLE',level:'block' as const,message:'차트 또는 현재가 응답 실패'}]}};
+    if(!waiting.position)delete waiting.setup;
+    state=recordAutoDecision(previous,waiting,config,now);
   }
   let savedKey:string|undefined;
   const latest=state.decisions?.[0];

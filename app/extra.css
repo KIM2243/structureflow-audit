@@ -2092,6 +2092,8 @@ button:disabled {
 .lecture-casebook textarea{min-height:120px;resize:vertical;}
 .casebook-question{display:grid;grid-template-columns:minmax(0,1fr) 160px;gap:16px;margin:12px 0;}
 .lecture-casebook a{color:#67d9bd;}
+.auto-health{margin:16px 0;padding:16px;border:1px solid #43536a;border-radius:10px;overflow-wrap:anywhere;}
+.auto-health p{font-size:14px;line-height:1.7;}
 @media(max-width:760px){.casebook-columns,.casebook-question{grid-template-columns:1fr;}.lecture-casebook{padding:12px;}}
 .auto-decision summary{cursor:pointer;font-size:14px;line-height:1.6;}
 .auto-decision p{font-size:14px;line-height:1.7;margin:8px 0;}
