@@ -1,0 +1,4 @@
+import {getUser,json} from '@/lib/auth';
+import {listEntryReviews,saveEntryReview,reviewChart} from '@/lib/entry-review-store';
+export async function GET(request:Request){const user=await getUser(request);if(!user)return json({error:'로그인이 필요합니다.'},401);try{const id=new URL(request.url).searchParams.get('chart');if(id){const chart=await reviewChart(user.id,id);return chart?json(chart):json({error:'저장 차트가 없습니다.'},404);}return json({reviews:await listEntryReviews(user.id)});}catch{return json({error:'검토 기록을 불러오지 못했습니다.'},503);}}
+export async function POST(request:Request){const user=await getUser(request);if(!user)return json({error:'로그인이 필요합니다.'},401);if(request.headers.get('origin')!==new URL(request.url).origin)return json({error:'요청 출처 오류'},403);try{const body=await request.json() as Record<string,unknown>;return json({reviews:await saveEntryReview(user.id,body)});}catch(e){return json({error:e instanceof Error?e.message:'저장 실패'},409);}}

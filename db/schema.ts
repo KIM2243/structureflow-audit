@@ -55,3 +55,14 @@ export const autoPaperRuntime = sqliteTable('auto_paper_runtime', {
   id: text('id').primaryKey(),
   heartbeatAt: integer('heartbeat_at').notNull(),
 });
+export const entryReviews = sqliteTable('entry_reviews', {
+  id:text('id').primaryKey(),
+  userId:text('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),
+  runId:text('run_id').notNull(),
+  decisionAt:integer('decision_at').notNull(),
+  decision:text('decision').notNull(),
+  draft:text('draft').notNull(),
+  replayKey:text('replay_key'),
+  revision:integer('revision').notNull().default(0),
+  updatedAt:integer('updated_at').notNull(),
+},t=>[uniqueIndex('idx_entry_review_identity').on(t.userId,t.runId,t.decisionAt),index('idx_entry_review_updated').on(t.userId,t.updatedAt)]);
