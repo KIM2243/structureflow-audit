@@ -1,3 +1,5 @@
+import { RequestGate } from './kiwoom-request-gate.ts';
+
 export type KiwoomMarket = 'KR' | 'US';
 export type KiwoomUsExchange = 'NA' | 'ND' | 'NY';
 
@@ -182,6 +184,17 @@ const CHART_CANDLE_LIMIT = 400;
 
 let cachedToken: CachedToken | null = null;
 let tokenRequest: Promise<CachedToken> | null = null;
+const requestGates = new Map<string, RequestGate>();
+function requestGate(config: KiwoomConfig) {
+  const key = `${config.mode}:${config.appKey}`;
+  let gate = requestGates.get(key);
+  if (!gate) {
+    // Real: below the US peak-time 3/sec cap; demo: below 1/sec.
+    gate = new RequestGate(config.mode === 'real' ? 400 : 1100);
+    requestGates.set(key, gate);
+  }
+  return gate;
+}
 
 function readConfig(): KiwoomConfig {
   const modeValue = (process.env.KIWOOM_MODE || 'demo').toLowerCase();
@@ -319,8 +332,10 @@ async function requestWithRetry(
   signal?: AbortSignal,
 ) {
   let lastError: unknown;
+  const gate = requestGate(config);
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     try {
+      await gate.wait(signal);
       const response = await fetchWithTimeout(
         url,
         init,
@@ -328,6 +343,8 @@ async function requestWithRetry(
         signal,
       );
       if (response.status === 429 || response.status >= 500) {
+        const delay = Math.max(retryAfterMs(response, attempt), response.status === 429 ? 1500 : 0);
+        if (response.status === 429) gate.defer(delay);
         const code = response.status === 429 ? 'rate_limit' : 'server';
         const message =
           response.status === 429
@@ -338,11 +355,12 @@ async function requestWithRetry(
           status: response.status,
           retryable: true,
         });
+        await response.arrayBuffer().catch(() => undefined);
         if (attempt === MAX_RETRIES) throw error;
         console.warn(
           `[kiwoom] ${code} status=${response.status} retry=${attempt + 1}/${MAX_RETRIES}`,
         );
-        await sleep(retryAfterMs(response, attempt), signal);
+        await sleep(delay, signal);
         continue;
       }
       return response;
@@ -1049,6 +1067,7 @@ export async function getCurrentPrice(
 }
 
 export function resetKiwoomTokenCacheForTests() {
+  requestGates.clear();
   cachedToken = null;
   tokenRequest = null;
 }

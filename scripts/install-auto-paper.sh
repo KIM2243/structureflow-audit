@@ -6,6 +6,8 @@ test -d /opt/structureflow-bridge
 test -f /etc/structureflow/bridge.env
 test -x /opt/node-v22.23.2-linux-x64/bin/node
 test -f ./lib/kiwoom.ts
+test -f ./lib/kiwoom-request-gate.ts
+test -f ./lib/bridge-request-cache.mjs
 test -f ./scripts/kiwoom-bridge.mjs
 test -f ./scripts/auto-paper-runner.mjs
 backup_dir="/opt/structureflow-bridge/backup-auto-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -13,6 +15,8 @@ install -d -m 700 "$backup_dir"
 cp -p /opt/structureflow-bridge/lib/kiwoom.ts "$backup_dir/kiwoom.ts"
 cp -p /opt/structureflow-bridge/scripts/kiwoom-bridge.mjs "$backup_dir/kiwoom-bridge.mjs"
 install -m 644 ./lib/kiwoom.ts /opt/structureflow-bridge/lib/kiwoom.ts
+install -m 644 ./lib/kiwoom-request-gate.ts /opt/structureflow-bridge/lib/kiwoom-request-gate.ts
+install -m 644 ./lib/bridge-request-cache.mjs /opt/structureflow-bridge/lib/bridge-request-cache.mjs
 install -m 644 ./scripts/kiwoom-bridge.mjs /opt/structureflow-bridge/scripts/kiwoom-bridge.mjs
 install -m 644 ./scripts/auto-paper-runner.mjs /opt/structureflow-bridge/scripts/auto-paper-runner.mjs
 systemctl restart structureflow-bridge

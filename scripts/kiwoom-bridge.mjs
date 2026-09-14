@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createRequestCache } from '../lib/bridge-request-cache.mjs';
 import {
   getCurrentPrice,
   getMarketChart,
@@ -10,6 +11,8 @@ import {
 const host = process.env.KIWOOM_BRIDGE_HOST || '127.0.0.1';
 const port = Number(process.env.KIWOOM_BRIDGE_PORT || 8790);
 const bridgeToken = process.env.KIWOOM_BRIDGE_TOKEN?.trim();
+const cachedQuote = createRequestCache(2000);
+const cachedChart = createRequestCache(10000);
 
 if (!bridgeToken || bridgeToken.length < 32) {
   throw new Error('KIWOOM_BRIDGE_TOKEN은 32자 이상의 임의 문자열이어야 합니다.');
@@ -58,7 +61,8 @@ async function quotes(url, response) {
     return;
   }
 
-  const settled = await Promise.allSettled(items.map((item) => getCurrentPrice(item)));
+  const settled = await Promise.allSettled(items.map((item) =>
+    cachedQuote(quoteRequestKey(item), () => getCurrentPrice(item))));
   const quoteValues = settled.flatMap((result) =>
     result.status === 'fulfilled' ? [result.value] : [],
   );
@@ -98,11 +102,12 @@ async function market(url, response) {
   }
 
   try {
-    const chart = await getMarketChart({
+    const includeOneMinute = url.searchParams.get('auto') === '1';
+    const chart = await cachedChart(`${market}:${exchange}:${symbol}:${includeOneMinute}`, () => getMarketChart({
       market,
       symbol,
       ...(market === 'US' ? { exchange } : {}),
-    }, undefined, url.searchParams.get('auto') === '1');
+    }, undefined, includeOneMinute));
     json(response, 200, { ...chart, fetchedAt: new Date().toISOString() });
   } catch (error) {
     const details = publicError(error);

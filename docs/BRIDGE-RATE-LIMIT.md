@@ -1,0 +1,9 @@
+# Bridge request pacing — 2026-09-14
+
+The Oracle bridge had 81 logged HTTP 429 responses during the ten minutes before repair. Quotes, independently loaded timeframes, continuation pages and paper-engine polling shared an API account but had no shared rate budget. Per-chart staggering did not cover overlapping callers. Kiwoom's REST introduction lists US query limits of 5/sec normally and 3/sec at 09:00–10:00 KST: https://openapi2.kiwoom.com/intro?dummyVal=0
+
+All upstream starts including retries now share an account/mode gate (400 ms real, 1100 ms demo). A 429 delays queued starts as well as its own retry. Identical bridge quote requests coalesce and retain success for two seconds; identical chart requests retain success for ten seconds. Cache hits keep original quote timestamps and candles; errors are not cached. The UI's five-second polling remains unchanged. This is process-local coordination in the single Oracle bridge, not a cross-host distributed rate limit.
+
+Deployed to the existing Oracle VM on 2026-09-14 at 01:51:37 UTC. Only structureflow-bridge was restarted; VM uptime remained over three days and the paper runner remained active. Rollback source is in /opt/structureflow-bridge/backup-ratefix-20260914. Added modules must accompany lib/kiwoom.ts and scripts/kiwoom-bridge.mjs; install-auto-paper.sh now includes them. No Sites frontend deployment or schema change was needed.
+
+Validation: 75 tests passed and TypeScript passed. Authenticated KR and US quote requests returned HTTP 200. Both charts returned 400 native M1 candles; KR latest M1 advanced to the current minute. Existing US paper account recovered from FEED_UNAVAILABLE to the proper stale-M1 hold, with a fresh quote and runner heartbeat. This does not demonstrate a completed paper fill or strategy profitability.
