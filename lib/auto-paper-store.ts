@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { advanceAuto, newAutoState, recordAutoDecision, type AutoConfig, type AutoState, type AutoFeed } from './auto-paper';
+import { AUTO_VERSION, advanceAuto, newAutoState, recordAutoDecision, type AutoConfig, type AutoState, type AutoFeed } from './auto-paper';
 import { makeDecisionReplay } from './decision-replay';
 import { fetchFromKiwoomBridge } from './bridge';
 import type { KiwoomChart, KiwoomQuote } from './kiwoom';
@@ -24,7 +24,7 @@ export async function listAutoRuns(userId:string) {
 }
 export async function createAutoRun(userId:string,config:AutoConfig) {
   if(!(await autoRuntime()).ready)throw new Error('자동 실행 서버 연결을 기다리고 있습니다.');
-  const instrument=`${config.market}:${config.exchange}:${config.symbol}`, now=Date.now();
+  const instrument=`${config.market}:${config.exchange}:${config.symbol}:${AUTO_VERSION}:${config.entryTimeframe||'1m'}`, now=Date.now();
   await env.DB.prepare(`INSERT INTO auto_paper_runs(id,user_id,instrument,config,state,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM auto_paper_runs WHERE user_id=?)<6 ON CONFLICT(user_id,instrument) DO NOTHING`).bind(crypto.randomUUID(),userId,instrument,JSON.stringify(config),JSON.stringify(newAutoState(config,now)),now,userId).run();
   return listAutoRuns(userId);
 }
@@ -55,7 +55,7 @@ export async function runAutoTick() {
     const q=await qres.json() as {quotes:KiwoomQuote[]};
     const quote=q.quotes.find(x=>x.key===key && x.status==='ok');
     if(!quote)throw new Error('같은 종목의 현재가 대기');
-    feed={source:chart.source,symbol:chart.symbol,timeframes:chart.timeframes,price:quote.price,observedAt:Date.parse(quote.timestamp)};
+    feed={source:chart.source,symbol:chart.symbol,timeframes:{...chart.timeframes,'5m':chart.candles},price:quote.price,observedAt:Date.parse(quote.timestamp)};
     state=advanceAuto(previous,config,feed,Date.now(),!!row.enabled,!!row.close_requested);
   } catch {
     const now=Date.now();

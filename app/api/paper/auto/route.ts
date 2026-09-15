@@ -13,7 +13,8 @@ export async function POST(request:Request) {
     if(body.action==='start') {
       const market=body.market,symbol=String(body.symbol||'').toUpperCase(),exchange=body.exchange||'ND';
       if(!['KR','US'].includes(String(market)) || !(market==='KR'?/^\d{6}$/:/^[A-Z][A-Z0-9.-]{0,9}$/).test(symbol) || !['NA','ND','NY'].includes(String(exchange)))return json({error:'종목 정보가 올바르지 않습니다.'},400);
-      const config:AutoConfig={market:market as 'US'|'KR',symbol,exchange:exchange as AutoConfig['exchange'],capital:market==='KR'?10000000:10000,riskPct:0.5,feeBps:5,slippageBps:5};
+      if(body.entryTimeframe!==undefined&&!['1m','5m'].includes(String(body.entryTimeframe)))return json({error:'진입 확인 시간대를 확인하세요.'},400);
+      const config:AutoConfig={market:market as 'US'|'KR',symbol,exchange:exchange as AutoConfig['exchange'],capital:market==='KR'?10000000:10000,riskPct:0.5,feeBps:5,slippageBps:5,entryTimeframe:body.entryTimeframe==='5m'?'5m':'1m'};
       return json({runs:await createAutoRun(user.id,config)});
     }
     if(!['pause','resume','close'].includes(String(body.action)) || typeof body.id!=='string')return json({error:'지원하지 않는 요청입니다.'},400);

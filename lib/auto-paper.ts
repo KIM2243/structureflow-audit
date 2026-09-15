@@ -2,11 +2,12 @@ import { mapMarketStructure, mechanicalInternalPivots } from './market-structure
 import type { Candle } from './engine';
 
 // Paper-only continuation experiment. Grade weights and partial exits are policy, not lecture formulas.
-export const AUTO_VERSION = 'PP-H4-M15-M1-long-short-partial-v2';
+export const LEGACY_V2 = 'PP-H4-M15-M1-long-short-partial-v2';
+export const AUTO_VERSION = 'PP-H4-target-M15-risk-refined-entry-v3';
 export type Direction = 'LONG' | 'SHORT';
 export type ZoneGrade = { grade: 'A'|'B'|'C'; score: number; maximum: number; reasons: string[]; retests: number };
 export type Zone = { low: number; high: number; at: number; id: string; quality?: ZoneGrade };
-export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number };
+export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number; entryTimeframe?: '1m'|'5m' };
 export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
 export type AutoDecision = {
   health?: AutoHealth;
@@ -24,12 +25,12 @@ export type AutoState = {
   stage: string; reason: string; source: string; mark: number; benchmarkStart: number;
   lastFreshAt?: number; chart?: Candle[];
   decisions?: AutoDecision[];
-  setup?: { id: string; direction?: Direction; zone: Zone; target: number; expires: number; touch?: number; m15?: Zone; retest?: number; m1?: Zone; used?: boolean };
+  setup?: { id: string; direction?: Direction; zone: Zone; target: number; expires: number; touch?: number; m15?: Zone; retest?: number; m1?: Zone; used?: boolean; plan?: {stop:number;target:number;at:number;stopTimeframe:'15m';targetTimeframe:'4H'} };
   position?: { direction?: Direction; quantity: number; entry: number; fee: number; stop: number; target: number; at: number; risk: number; setupId: string; partialTarget?: number; partialQuantity?: number; partialDone?: boolean; realized?: number };
   fills: AutoFill[]; audit: { at: number; stage: string; reason: string }[];
   closed: number; wins: number; netPnl: number; sumR: number; peak: number; maxDrawdown: number;
 };
-export type AutoFeed = { source: string; symbol: string; timeframes: { '1m'?: Candle[]; '15m': Candle[]; '1H': Candle[]; '4H': Candle[] }; price: number; observedAt: number };
+export type AutoFeed = { source: string; symbol: string; timeframes: { '1m'?: Candle[]; '5m'?: Candle[]; '15m': Candle[]; '1H': Candle[]; '4H': Candle[] }; price: number; observedAt: number };
 export type AutoHealth={at:number;quoteAgeMs:number|null;m1AgeMs:number|null;issues:{code:string;level:'block'|'warning';message:string}[]};
 // Bridge and Worker clocks are independent; retain raw times but allow bounded skew.
 export const QUOTE_CLOCK_SKEW_MS=2000;
@@ -111,6 +112,11 @@ export function qualifiedZone(bars: Candle[], minutes: number): { zone: Zone; ta
   zone.quality=gradeZone(bars,zone,direction,minutes);
   return {zone,target:m.weakLevel.price,direction};
 }
+export function upperStructurePlan(zone:Zone,target:number,direction:Direction,at:number) {
+  const stop=direction==='LONG'?zone.low*.999:zone.high*1.001;
+  if(![stop,target,at].every(Number.isFinite)||stop<=0||target<=0||at<zone.at || (direction==='LONG'?target<=zone.high:target>=zone.low))return;
+  return {stop,target,at,stopTimeframe:'15m' as const,targetTimeframe:'4H' as const};
+}
 export function shiftedZone(bars: Candle[], minutes: number, after: number, parent: Zone, direction:Direction='LONG') {
   const long=direction==='LONG', trend=long?'BULLISH':'BEARISH';
   const m=mapMarketStructure(bars), event=m.events.at(-1);
@@ -162,15 +168,15 @@ export function recordAutoDecision(previous: AutoState, s: AutoState, config: Au
   // Capture transitions and one sample per minute, without growing every poll.
   if(latest && latest.stage===s.stage && latest.reason===s.reason && latest.setup?.id===s.setup?.id && !fills.length && Math.floor(latest.at/60000)===Math.floor(now/60000))return s;
   const bars=feed?Object.entries(feed.timeframes).map(([timeframe,rows])=>{
-    const minutes=({'1m':1,'15m':15,'1H':60,'4H':240} as Record<string,number>)[timeframe];
+    const minutes=({'1m':1,'5m':5,'15m':15,'1H':60,'4H':240} as Record<string,number>)[timeframe];
     const completed=closedBars(rows||[],minutes,now);
     return {timeframe,received:rows?.length||0,completed:completed.length,lastCompleted:completed.at(-1)?.date||null};
   }):[];
   let checks:AutoDecision['checks'];
   if(feed && s.stage!=='DATA_WAIT' && s.setup?.m1) {
-    const z=s.setup.m1, direction=s.setup.direction||'LONG', stop=direction==='LONG'?z.low*.999:z.high*1.001;
+    const z=s.setup.m1, direction=s.setup.direction||'LONG', stop=s.version===AUTO_VERSION?(s.setup.plan?.stop??0):(direction==='LONG'?z.low*.999:z.high*1.001);
     const terms=entryTerms(feed.price,stop,s.setup.target,previous.cash,config,direction);
-    const partial=s.version===AUTO_VERSION?Math.floor(terms.quantity/2):0;
+    const partial=s.version===LEGACY_V2?Math.floor(terms.quantity/2):0;
     checks={insideM1:feed.price>=z.low&&feed.price<=z.high,afterM1:now>z.at,quantity:terms.quantity,stop,target:s.setup.target,netTargetR:terms.rr,weightedR:terms.quantity?(partial+(terms.quantity-partial)*terms.rr)/terms.quantity:0,h1Direction:internalDirection(closedBars(feed.timeframes['1H'],60,now))};
   }
   const decision:AutoDecision={at:now,health:structuredClone(s.health),model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
@@ -182,7 +188,7 @@ export function advanceAuto(previous: AutoState, config: AutoConfig, feed: AutoF
 }
 function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed, now: number, enabled=true, closeRequested=false): AutoState {
   const s=structuredClone(previous); s.lastChecked=now;
-  const v2=s.version===AUTO_VERSION;
+  const v3=s.version===AUTO_VERSION, v2=s.version===LEGACY_V2||v3;
   const one=feed.timeframes['1m'] || [];
   s.health=inspectAutoFeed(feed,config,now,s.lastQuoteAt);
   const blocked=s.health.issues.filter(i=>i.level==='block');
@@ -195,6 +201,8 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   let context=qualifiedZone(h4,240);
   if(!v2 && context?.direction==='SHORT')context=undefined;
   const m1=closedBars(one,1,now);
+  const entryMinutes=v3&&config.entryTimeframe==='5m'?5:1;
+  const entryBars=entryMinutes===5?closedBars(feed.timeframes['5m']||[],5,now):m1;
   const newBars=m1.filter(b=>Date.parse(b.date)+60_000>s.lastBar);
   // Never backfill entries. Exit barriers on bars wholly after entry are conservative;
   // simultaneous stop+target selects stop, gap through stop executes at worse open.
@@ -221,6 +229,7 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   }
   s.lastBar=Math.max(s.lastBar,Date.parse(m1.at(-1)?.date||'')+60_000||0);
   if(s.position) { status(s,now,'HOLDING','보유 중 · 고정 손절·목표 및 4시간 구조 감시'); return markEquity(s); }
+  if(entryMinutes===5 && (entryBars.length<20 || !validBars(feed.timeframes['5m']||[]) || (feed.timeframes['5m']||[]).some(b=>Date.parse(b.date)>now))) {status(s,now,'DATA_WAIT','원본 5분봉 부족 또는 시각 오류 · 신규 진입 보류');return markEquity(s);}
   if(!enabled || closeRequested) { status(s,now,'PAUSED','신규 진입 중지'); return markEquity(s); }
   if(s.health.issues.some(i=>i.code==='M1_GAP')){delete s.setup;status(s,now,'DATA_GAP','최근 1분봉 간격 확인 대기 · 신규 진입 보류');return markEquity(s);}
   if(s.closed>=500) {status(s,now,'COMPLETE','500건 실험 완료 · 결과 검토 후 새 모델로 진행');return markEquity(s);}
@@ -231,9 +240,9 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   const direction=setup.direction||'LONG', long=direction==='LONG';
   if(s.fills.some(f=>f.setupId===setup.id))setup.used=true;
   if(setup.used) { status(s,now,'WAIT_NEW_SETUP','같은 설정 재진입 금지 · 새 4시간 구조 대기'); return markEquity(s); }
-  const invalidZone=setup.m1||setup.m15||setup.zone;
+  const invalidZone=v3?(setup.m15||setup.zone):(setup.m1||setup.m15||setup.zone);
   if(now>setup.expires || (m1.at(-1) && (long?m1.at(-1)!.close<invalidZone.low:m1.at(-1)!.close>invalidZone.high))) {setup.used=true;status(s,now,'INVALIDATED','기원 구역 종가 이탈 또는 설정 유효시간 종료');return markEquity(s);}
-  if(setup.m1) {const last=mapMarketStructure(m1).events.at(-1);if(last?.direction===(long?'BEARISH':'BULLISH') && Date.parse(m1[last.index].date)+60000>setup.m1.at){setup.used=true;status(s,now,'INVALIDATED','진입 전 1분 구조가 반대 방향으로 전환');return markEquity(s);}}
+  if(setup.m1) {const last=mapMarketStructure(entryBars).events.at(-1);if(last?.direction===(long?'BEARISH':'BULLISH') && Date.parse(entryBars[last.index].date)+entryMinutes*60000>setup.m1.at){setup.used=true;status(s,now,'INVALIDATED','진입 전 하위 구조가 반대 방향으로 전환');return markEquity(s);}}
   const inside=(z:Zone)=>feed.price>=z.low && feed.price<=z.high;
   if(!setup.touch) {
     if(inside(setup.zone) && now>setup.zone.at) {setup.touch=now;status(s,now,'WAIT_M15_SHIFT','4시간 수요·공급 구역 접촉 확인 · 이후 15분 진입 방향 전환 대기');}
@@ -242,37 +251,40 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
   }
   if(!setup.m15) {
     setup.m15=shiftedZone(closedBars(feed.timeframes['15m'],15,now),15,setup.touch,setup.zone,direction);
+    if(v3&&setup.m15)setup.plan=upperStructurePlan(setup.m15,setup.target,direction,now);
     status(s,now,setup.m15?'WAIT_M15_RETEST':'WAIT_M15_SHIFT',setup.m15?'15분 진입 방향 전환 확인 · 기원 구역 재접촉 대기':'접촉 이후 15분 종가 전환·구역 확정 대기'); return markEquity(s);
   }
   if(!setup.retest) {
     if(inside(setup.m15) && now>setup.m15.at) setup.retest=now;
-    status(s,now,setup.retest?'WAIT_M1_SHIFT':'WAIT_M15_RETEST',setup.retest?'15분 재접촉 확인 · 이후 1분 진입 방향 전환 대기':'15분 기원 구역 재접촉 대기'); return markEquity(s);
+    status(s,now,setup.retest?'WAIT_M1_SHIFT':'WAIT_M15_RETEST',setup.retest?'15분 재접촉 확인 · 이후 선택한 하위 시간대 전환 대기':'15분 기원 구역 재접촉 대기'); return markEquity(s);
   }
   if(!setup.m1) {
-    setup.m1=shiftedZone(m1,1,setup.retest,setup.m15,direction);
-    status(s,now,setup.m1?'WAIT_ENTRY':'WAIT_M1_SHIFT',setup.m1?'1분 진입 방향 전환 확인 · 정제 구역 재접촉 대기':'15분 재접촉 이후 1분 종가 전환 대기'); return markEquity(s);
+    if(v3&&!setup.plan){status(s,now,'INVALIDATED','진입 전 상위 손절·목표 계획 없음 · 새 설정 필요');setup.used=true;return markEquity(s);}
+    setup.m1=shiftedZone(entryBars,entryMinutes,setup.retest,setup.m15,direction);
+    status(s,now,setup.m1?'WAIT_ENTRY':'WAIT_M1_SHIFT',setup.m1?`${entryMinutes}분 전환 확인 · 정제 구역 재접촉 대기`:`상위 손절·목표 계획 이후 ${entryMinutes}분 전환 대기`); return markEquity(s);
   }
-  if(now-setup.m1.at>30*60000) {setup.used=true;status(s,now,'EXPIRED','1분 진입 대기 30분 만료');return markEquity(s);}
+  if(now-setup.m1.at>30*60000) {setup.used=true;status(s,now,'EXPIRED','하위 진입 대기 30분 만료');return markEquity(s);}
   if(internalDirection(h1)!==(long?1:-1)) {status(s,now,'WAIT_PP','1시간 내부 구조의 진입 방향 동행(PP) 대기');return markEquity(s);}
   if(v2) {
     setup.zone.quality=gradeZone(h4,setup.zone,direction,240);
     setup.m15.quality=gradeZone(closedBars(feed.timeframes['15m'],15,now),setup.m15,direction,15,true);
-    setup.m1.quality=gradeZone(m1,setup.m1,direction,1,true);
+    setup.m1.quality=gradeZone(entryBars,setup.m1,direction,entryMinutes,true);
     if([setup.zone,setup.m15,setup.m1].some(z=>z.quality?.grade==='C')) {status(s,now,'WAIT_GRADE','C등급 구역 제외 · A/B등급 기회 대기');return markEquity(s);}
   }
-  const stop=long?setup.m1.low*.999:setup.m1.high*1.001;
+  if(v3&&(!setup.plan || setup.plan.at>setup.m1.at || setup.plan.target!==setup.target)){status(s,now,'INVALIDATED','상위 계획의 선행 시점·목표 불일치');return markEquity(s);}
+  const stop=v3?setup.plan!.stop:(long?setup.m1.low*.999:setup.m1.high*1.001);
   const terms=entryTerms(feed.price,stop,setup.target,s.cash,config,direction);
-  const partialQuantity=v2?Math.floor(terms.quantity/2):0;
+  const partialQuantity=s.version===LEGACY_V2?Math.floor(terms.quantity/2):0;
   const blendedR=terms.quantity?(partialQuantity+(terms.quantity-partialQuantity)*terms.rr)/terms.quantity:0;
   if(!inside(setup.m1) || now<=setup.m1.at || !(blendedR>=2) || terms.quantity<1) {
-    status(s,now,'WAIT_ENTRY','1분 구역 재접촉·비용 차감 2R·위험 한도 확인 중');return markEquity(s);
+    status(s,now,'WAIT_ENTRY','하위 구역 재접촉·상위 목표까지 비용 차감 2R·위험 한도 확인 중');return markEquity(s);
   }
   const fee=terms.entry*terms.quantity*config.feeBps/10000;
   s.cash-=terms.entry*terms.quantity+fee;
   const d=long?1:-1, rate=config.feeBps/10000;
   const partialTarget=(terms.unitRisk+terms.entry*(d+rate))/(d-rate)/(1-d*config.slippageBps/10000);
   s.position={direction,quantity:terms.quantity,entry:terms.entry,fee,stop,target:setup.target,at:now,risk:terms.unitRisk*terms.quantity,setupId:setup.id,...(partialQuantity?{partialQuantity,partialTarget}: {})};
-  s.fills.unshift({id:`${setup.id}:ENTRY`,side:long?'BUY':'SELL',direction,action:'ENTRY',model:s.version,at:now,price:terms.entry,quantity:terms.quantity,fee,reason:`${direction} · H4 접촉 → M15 전환·재접촉 → M1 전환·재접촉 + H1 PP + 부분청산 반영 순 2R`,pnl:0,r:0,setupId:setup.id,source:s.source,observedAt:feed.observedAt});
+  s.fills.unshift({id:`${setup.id}:ENTRY`,side:long?'BUY':'SELL',direction,action:'ENTRY',model:s.version,at:now,price:terms.entry,quantity:terms.quantity,fee,reason:v3?`${direction} · M15 손절·H4 목표 사전 고정 → ${entryMinutes}분 정제 · 순 2R · 고정 부분익절 없음`:`${direction} · H4 접촉 → M15 전환·재접촉 → M1 전환·재접촉 + H1 PP + 부분청산 반영 순 2R`,pnl:0,r:0,setupId:setup.id,source:s.source,observedAt:feed.observedAt});
   setup.used=true; status(s,now,'HOLDING',`조건 충족 · 현재 관측 시세로 ${long?'롱':'숏'} 모의 진입`); return markEquity(s);
 }
 export function autoEquity(s:AutoState) {const p=s.position;return s.cash+(p?p.quantity*(p.entry+(p.direction==='SHORT'?-1:1)*(s.mark-p.entry)):0);}

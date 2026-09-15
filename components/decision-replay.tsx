@@ -6,13 +6,13 @@ export function DecisionReplayPanel({runId,at,onClose,reviewId,expectedZone}:{ru
   const [data,setData]=useState<DecisionReplay|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0);
   const [frame,setFrame]=useState<ReplayFrame>('1m'),[cursor,setCursor]=useState(0),[playing,setPlaying]=useState(false);
   useEffect(()=>{const controller=new AbortController();setData(null);setError('');setPlaying(false);
-    void fetch(reviewId?`/api/paper/reviews?${new URLSearchParams({chart:reviewId})}`:`/api/paper/auto/replay?${new URLSearchParams({run:runId,at:String(at)})}`,{cache:'no-store',signal:controller.signal}).then(async r=>{const p=await r.json() as DecisionReplay&{error?:string};if(!r.ok)throw new Error(p.error);if(!controller.signal.aborted){setData(p);setFrame('1m');setCursor(p.candles['1m'].length);}}).catch(e=>{if(!controller.signal.aborted)setError(e.message||'불러오기 실패');});return()=>controller.abort();
+    void fetch(reviewId?`/api/paper/reviews?${new URLSearchParams({chart:reviewId})}`:`/api/paper/auto/replay?${new URLSearchParams({run:runId,at:String(at)})}`,{cache:'no-store',signal:controller.signal}).then(async r=>{const p=await r.json() as DecisionReplay&{error?:string};if(!r.ok)throw new Error(p.error);if(!controller.signal.aborted){setData(p);const initial=p.decision.config.entryTimeframe||'1m';setFrame(initial);setCursor(p.candles[initial]?.length||0);}}).catch(e=>{if(!controller.signal.aborted)setError(e.message||'불러오기 실패');});return()=>controller.abort();
   },[runId,at,retry,reviewId]);
   const rows=data?.candles[frame]||[];
   useEffect(()=>{if(!playing)return;const id=setInterval(()=>setCursor(c=>Math.min(rows.length,c+1)),600);return()=>clearInterval(id);},[playing,rows.length]);
   useEffect(()=>{if(cursor>=rows.length)setPlaying(false);},[cursor,rows.length]);
   const d=data?.decision,visible=rows.slice(0,cursor).slice(-90),final=cursor===rows.length;
-  const zone=d?.setup?(frame==='4H'?d.setup.zone:frame==='15m'?d.setup.m15:frame==='1m'?d.setup.m1:undefined):undefined;
+  const zone=d?.setup?(frame==='4H'?d.setup.zone:frame==='15m'?d.setup.m15:frame===(d.config.entryTimeframe||'1m')?d.setup.m1:undefined):undefined;
   const expected=expectedZone?.frame===frame?expectedZone:undefined;
   const levels=final?[...(zone?[zone.low,zone.high]:[]),...(expected?[expected.low,expected.high]:[]),...(d?.position?[d.position.stop,d.position.target]:[])]:[];
   const values=[...visible.flatMap(b=>[b.low,b.high]),...levels];const lo=Math.min(...values),hi=Math.max(...values),range=hi-lo||1;
@@ -23,7 +23,7 @@ export function DecisionReplayPanel({runId,at,onClose,reviewId,expectedZone}:{ru
     {error?<p role="alert">{error} <button onClick={()=>setRetry(n=>n+1)}>다시 시도</button></p>:!data?<p role="status">저장한 차트를 불러오는 중입니다.</p>:<>
       <p>{d!.symbol} · {stamp(d!.at)} · {d!.reason}</p>
       <p className="auto-paper-note">당시 수신한 완료 봉만 재생합니다. 봉 내부의 틱 움직임·진행 봉은 재현하지 않습니다. 구역·손절·목표·체결은 판단 시점까지 재생한 뒤 표시하며, 앞선 봉에서 매매 규칙을 다시 계산하지 않습니다.</p>
-      <div className="auto-paper-controls">{replayFrames.map(f=><button key={f} aria-pressed={frame===f} onClick={()=>{setFrame(f);setCursor(data.candles[f].length);setPlaying(false);}}>{f}</button>)}<button onClick={download}>차트 기록 내려받기</button></div>
+      <div className="auto-paper-controls">{replayFrames.map(f=><button key={f} disabled={!data.candles[f]?.length} aria-pressed={frame===f} onClick={()=>{setFrame(f);setCursor(data.candles[f]?.length||0);setPlaying(false);}}>{f}</button>)}<button onClick={download}>차트 기록 내려받기</button></div>
       {!rows.length?<p>이 시간대의 완료 봉이 없습니다.</p>:<>
         <div className="auto-paper-controls"><button onClick={()=>{setPlaying(false);setCursor(1);}}>처음</button><button disabled={cursor<=1} onClick={()=>{setPlaying(false);setCursor(c=>c-1);}}>이전 봉</button><button onClick={()=>{if(final)setCursor(1);setPlaying(p=>!p);}}>{playing?'일시정지':'재생'}</button><button disabled={final} onClick={()=>{setPlaying(false);setCursor(c=>c+1);}}>다음 봉</button><button onClick={()=>{setPlaying(false);setCursor(rows.length);}}>판단 시점</button></div>
         <label className="replay-slider">봉 탐색 · {cursor}/{rows.length}<input aria-label="재생 봉 위치" type="range" min="1" max={rows.length} value={cursor} onChange={e=>{setPlaying(false);setCursor(Number(e.target.value));}}/></label>

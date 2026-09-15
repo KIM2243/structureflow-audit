@@ -1,3 +1,5 @@
+> 현재 새 실험 규칙은 [상위 계획 기반 v3](AUTO-PAPER-V3.md)를 참고하세요. 아래는 이전 구현과 강의 대조 기록입니다.
+
 # Lecture alignment — 2026-09-09
 
 ## Evidence boundary

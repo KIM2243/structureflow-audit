@@ -1,5 +1,5 @@
 import type { Analysis, Snapshot, Candle } from './engine';
-import { closedBars, qualifiedZone, shiftedZone, internalDirection, entryTerms, gradeZone, validBars } from './auto-paper.ts';
+import { closedBars, qualifiedZone, shiftedZone, internalDirection, entryTerms, gradeZone, validBars, upperStructurePlan } from './auto-paper.ts';
 
 export type EntryTimeframe = '1D' | '4H' | '1H' | '15m' | '1m' | '5m';
 export type EntryDirection = 'LONG' | 'SHORT' | 'NEUTRAL';
@@ -17,6 +17,7 @@ export type MultiTimeframeEntry = {
   entryTimeframe: '1m';
   summary: string;
   steps: MultiTimeframeEntryStep[];
+  riskPlan?: ReturnType<typeof upperStructurePlan>;
 };
 
 type EntryInput = {
@@ -67,9 +68,9 @@ export function evaluateMultiTimeframeEntry({
   const m1=m15&&m15Touch&&context?shiftedZone(one,1,Date.parse(m15Touch.date)+60000,m15,context.direction):undefined;
   const m1Touch=m1?contact(one,m1):undefined;
   const gradePass=!!context&&!!m15&&!!m1&&[context.zone.quality,gradeZone(fifteen,m15,context.direction,15,true),gradeZone(one,m1,context.direction,1,true)].every(q=>q&&q.grade!=='C');
-  const terms=context&&m1&&current?entryTerms(current.close,context.direction==='LONG'?m1.low*.999:m1.high*1.001,context.target,capital,{market:'US',symbol:'PREVIEW',exchange:'ND',capital,riskPct:.5,feeBps:5,slippageBps:5},context.direction):undefined;
-  const partial=terms?Math.floor(terms.quantity/2):0;
-  const netR=terms&&terms.quantity?(partial+(terms.quantity-partial)*terms.rr)/terms.quantity:0;
+  const riskPlan=context&&m15?upperStructurePlan(m15,context.target,context.direction,m15.at):undefined;
+  const terms=context&&m1&&current&&riskPlan?entryTerms(current.close,riskPlan.stop,riskPlan.target,capital,{market:'US',symbol:'PREVIEW',exchange:'ND',capital,riskPct:.5,feeBps:5,slippageBps:5},context.direction):undefined;
+  const netR=terms&&terms.quantity?terms.rr:0;
   triggered=triggered&&nativeReady&&fresh&&!!m1Touch&&!!m1&&!!context&&context.direction===direction&&gradePass&&netR>=2&&now-m1.at<=1800000&&!!current&&current.close>=m1.low&&current.close<=m1.high;
 
   const steps: MultiTimeframeEntryStep[] = [
@@ -150,8 +151,8 @@ export function evaluateMultiTimeframeEntry({
         triggerDirection !== direction && triggerDirection !== 'NEUTRAL'
           ? '1분 트리거가 상위 추세와 반대입니다.'
           : triggered
-            ? '1분 전환·포함·재접촉 · A/B등급 · 부분청산 반영 순 2R 확인 (차트 후보)'
-            : !nativeReady||!fresh?'원본 1분봉 부족 또는 지연 · 진입 보류':'15분 재접촉 이후 1분 전환·재접촉·등급·부분청산 반영 순 2R 대기',
+            ? '1분 전환·포함·재접촉 · A/B등급 · 상위 계획 순 2R 확인 (차트 후보)'
+            : !nativeReady||!fresh?'원본 1분봉 부족 또는 지연 · 진입 보류':'15분 재접촉 이후 1분 전환·재접촉·등급·상위 계획 순 2R 대기',
     },
   ];
 
@@ -166,6 +167,7 @@ export function evaluateMultiTimeframeEntry({
 
   return {
     status,
+    riskPlan,
     direction,
     entryTimeframe,
     summary:
