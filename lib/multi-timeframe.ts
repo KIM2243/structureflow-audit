@@ -1,3 +1,4 @@
+import {composeTradePlan,type TradePlan} from './trade-plan.ts';
 import type { Analysis, Snapshot, Candle } from './engine';
 import { closedBars, qualifiedZone, shiftedZone, internalDirection, entryTerms, gradeZone, validBars, upperStructurePlan } from './auto-paper.ts';
 
@@ -14,13 +15,15 @@ export type MultiTimeframeEntryStep = {
 export type MultiTimeframeEntry = {
   status: 'READY' | 'WAIT' | 'BLOCKED';
   direction: EntryDirection;
-  entryTimeframe: '1m';
+  entryTimeframe: '1m'|'5m';
+  tradePlan:TradePlan;
   summary: string;
   steps: MultiTimeframeEntryStep[];
   riskPlan?: ReturnType<typeof upperStructurePlan>;
 };
 
 type EntryInput = {
+  entryFrame?:'1m'|'5m';
   snapshots: Record<EntryTimeframe, Snapshot>;
   analyses: Record<'5m' | '15m' | '1H', Analysis> & Partial<Record<'1m', Analysis>>;
   candles?: Partial<Record<EntryTimeframe, Candle[]>>;
@@ -40,6 +43,7 @@ export function evaluateMultiTimeframeEntry({
   candles,
   now=Date.now(),
   capital=10000,
+  entryFrame='1m',
 }: EntryInput): MultiTimeframeEntry {
   const dailyDirection = trendDirection(snapshots['1D'].trend);
   const middleDirection = trendDirection(snapshots['4H'].trend);
@@ -47,27 +51,28 @@ export function evaluateMultiTimeframeEntry({
   const internal = internalDirection(closedBars(candles?.['1H']||[],60,now));
   const confirmationDirection:EntryDirection = internal===1?'LONG':internal===-1?'SHORT':'NEUTRAL';
   const timingDirection = analyses['15m'].bias;
-  const triggerDirection = analyses['1m']?.bias||'NEUTRAL';
-  const entryTimeframe = '1m';
+  const triggerDirection = analyses[entryFrame]?.bias||'NEUTRAL';
+  const entryTimeframe = entryFrame;
+  const entryMinutes=entryFrame==='5m'?5:1;
   const plan = analyses['15m'].entryForecast;
-  const trigger = analyses['1m']?.entryForecast;
+  const trigger = analyses[entryFrame]?.entryForecast;
   const touchTime = Date.parse(plan.zoneTouchTime ?? '');
   const reactionTime = Date.parse(trigger?.reactionTime ?? '');
   let triggered = !!trigger?.reactionConfirmed && Number.isFinite(touchTime)
     && Number.isFinite(reactionTime) && reactionTime > touchTime;
   // Chart review uses completed historical bars only. The paper engine separately
   // requires contacts observed after the run starts; this panel never places orders.
-  const raw=candles?.['1m']||[], one=closedBars(raw,1,now), fifteen=closedBars(candles?.['15m']||[],15,now);
+  const raw=candles?.['1m']||[], one=closedBars(candles?.[entryFrame]||[],entryMinutes,now), fifteen=closedBars(candles?.['15m']||[],15,now);
   const four=closedBars(candles?.['4H']||[],240,now), context=qualifiedZone(four,240);
-  const nativeReady=[raw,candles?.['15m']||[],candles?.['1H']||[],candles?.['4H']||[]].every(b=>b.length>=20&&validBars(b));
+  const nativeReady=[candles?.[entryFrame]||[],raw,candles?.['15m']||[],candles?.['1H']||[],candles?.['4H']||[]].every(b=>b.length>=20&&validBars(b));
   const current=raw.at(-1), fresh=!!current&&now-Date.parse(current.date)<=120000&&Date.parse(current.date)<=now;
   const contact=(bars:Candle[],z:{low:number;high:number;at:number})=>bars.find(b=>Date.parse(b.date)>=z.at&&b.low<=z.high&&b.high>=z.low);
   const h4Touch=context?contact(fifteen,context.zone):undefined;
   const m15=context&&h4Touch?shiftedZone(fifteen,15,Date.parse(h4Touch.date)+900000,context.zone,context.direction):undefined;
   const m15Touch=m15?contact(one,m15):undefined;
-  const m1=m15&&m15Touch&&context?shiftedZone(one,1,Date.parse(m15Touch.date)+60000,m15,context.direction):undefined;
+  const m1=m15&&m15Touch&&context?shiftedZone(one,entryMinutes,Date.parse(m15Touch.date)+entryMinutes*60000,m15,context.direction):undefined;
   const m1Touch=m1?contact(one,m1):undefined;
-  const gradePass=!!context&&!!m15&&!!m1&&[context.zone.quality,gradeZone(fifteen,m15,context.direction,15,true),gradeZone(one,m1,context.direction,1,true)].every(q=>q&&q.grade!=='C');
+  const gradePass=!!context&&!!m15&&!!m1&&[context.zone.quality,gradeZone(fifteen,m15,context.direction,15,true),gradeZone(one,m1,context.direction,entryMinutes,true)].every(q=>q&&q.grade!=='C');
   const riskPlan=context&&m15?upperStructurePlan(m15,context.target,context.direction,m15.at):undefined;
   const terms=context&&m1&&current&&riskPlan?entryTerms(current.close,riskPlan.stop,riskPlan.target,capital,{market:'US',symbol:'PREVIEW',exchange:'ND',capital,riskPct:.5,feeBps:5,slippageBps:5},context.direction):undefined;
   const netR=terms&&terms.quantity?terms.rr:0;
@@ -137,7 +142,7 @@ export function evaluateMultiTimeframeEntry({
             : '15분 방향이 상위 추세와 반대입니다.',
     },
     {
-      timeframe: '1m',
+      timeframe: entryFrame,
       label: '실행 트리거',
       state:
         direction === 'NEUTRAL' || triggerDirection === 'NEUTRAL'
@@ -157,7 +162,7 @@ export function evaluateMultiTimeframeEntry({
   ];
 
   const coreSteps = steps.filter((step) =>
-    ['4H', '1H', '15m', '1m'].includes(step.timeframe),
+    ['4H', '1H', '15m', entryFrame].includes(step.timeframe),
   );
   const status = coreSteps.some((step) => step.state === 'BLOCK')
     ? 'BLOCKED'
@@ -168,6 +173,7 @@ export function evaluateMultiTimeframeEntry({
   return {
     status,
     riskPlan,
+    tradePlan:composeTradePlan({direction,entryFrame,ready:status==='READY',stage:!nativeReady||!fresh?'데이터 확인 대기':!context?'4H 방향·구역 확정 대기':!h4Touch?'4H 관심 구역 접촉 대기':!m15?'15분 전환 대기':!m15Touch?'15분 재접촉 대기':!m1?'하위 전환·정제 대기':status!=='READY'?'재접촉·방향·등급·비용 확인 대기':'참고 진입 조건 충족',interest:context?.zone,refined:m1,risk:riskPlan,netR,asOf:now}),
     direction,
     entryTimeframe,
     summary:
@@ -176,6 +182,6 @@ export function evaluateMultiTimeframeEntry({
         : status === 'BLOCKED'
           ? '시간대 방향 충돌로 진입 차단'
           : '시간대별 진입 조건 확인 중',
-    steps,
+    steps:steps.map(step=>entryFrame==='5m'?{...step,detail:step.detail.replaceAll('1분','5분')}:step),
   };
 }

@@ -2127,3 +2127,5 @@ button:disabled {
 .tf-row > button.tf-signal.short {color:var(--red)}
 .tf-row > button.tf-signal.neutral {color:var(--amber)}
 .tf-row > button.tf-signal:hover {background:#202d3b}
+
+.common-plan-card{margin:0 14px 14px;padding:16px;border:1px solid #2a4851;border-radius:10px;background:#101b22}.common-plan-card header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.common-plan-card header strong{font-size:17px;color:#64d9c0}.common-plan-card header small{margin-left:auto;color:#91a6bb}.common-plan-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:16px}.common-plan-values small,.common-plan-values b{display:block;line-height:1.7;overflow-wrap:anywhere}.common-plan-values small,.common-plan-card p{color:#91a6bb;font-size:12px}.common-plan-values b{font-size:13px}.common-plan-card p{margin:14px 0 0;line-height:1.6}@media(max-width:800px){.common-plan-values{grid-template-columns:1fr}.common-plan-card header small{margin-left:0}}

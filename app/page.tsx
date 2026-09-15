@@ -1,4 +1,5 @@
 'use client';
+import type {TradePlan} from '@/lib/trade-plan';
 import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
 
 import { qualifiedZone, closedBars } from '@/lib/auto-paper';
@@ -379,7 +380,7 @@ const timeframeButtonLabels: Record<Timeframe, string> = {
 function timeframeRole(timeframe: Timeframe) {
   if (timeframe === '1D') return '상위 추세';
   if (timeframe === '4H') return '중간 추세';
-  return '실제 진입';
+  return '하위 구조';
 }
 
 function directionLabel(bias: Analysis['bias']) {
@@ -863,11 +864,12 @@ function describeExitReason(trade: BacktestTrade, market: Market) {
 
 
 type TrendMap = {entry:[number,number];stop:number;target:number;caption:string;refined?:[number,number];entryFrame?:string};
-function trendMap(data:Record<Timeframe,Candle[]>,risk?:{stop:number;target:number},entryFrame:Timeframe='1m'):TrendMap|undefined{
- const context=qualifiedZone(closedBars(data['4H'],240,Date.now()),240);if(!context)return;
- const lower=analyze(data[entryFrame]);const refined=lower.bias===context.direction&&lower.entryForecast.zoneValid&&lower.entry[0]>=context.zone.low&&lower.entry[1]<=context.zone.high?lower.entry:undefined;
- return {refined,entryFrame,entry:[context.zone.low,context.zone.high],stop:risk?.stop??(context.direction==='LONG'?context.zone.low*.999:context.zone.high*1.001),target:risk?.target??context.target,caption:risk?'15분 손절·4H 목표 참고 / 음영은 4H 관심 구역':'4H 관심 구역·구조 무효화·목표 후보 / 진입 정제 대기'};
+
+function evaluateChartPlan(data:Record<Timeframe,Candle[]>,entryFrame:'1m'|'5m'='1m',capital=10000){
+ return evaluateMultiTimeframeEntry({candles:data,entryFrame,capital,snapshots:Object.fromEntries(Object.entries(data).map(([f,rows])=>[f,structureSnapshot(rows)])) as Record<Timeframe,Snapshot>,analyses:{'1m':analyze(data['1m']),'5m':analyze(data['5m']),'15m':analyze(data['15m']),'1H':analyze(data['1H'])}});
 }
+function chartOverlay(plan:TradePlan):TrendMap|undefined{return plan.ready&&plan.entry&&plan.stop&&plan.target?{entry:plan.entry,stop:plan.stop,target:plan.target,caption:(plan.direction==='LONG'?'롱':'숏')+' · 공통 참고 계획 · '+plan.entryFrame+' 정제',entryFrame:plan.entryFrame}:undefined;}
+function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){return <section className="common-plan-card" aria-label="공통 거래 계획"><header><strong>{plan.direction==='LONG'?'롱 계획':plan.direction==='SHORT'?'숏 계획':'방향 미확정'}</strong><span>{plan.stage}</span><small>4H 기준 · {plan.entryFrame} 정제 · 차트 참고</small></header><div className="common-plan-values"><div><small>4H 관심 구역 · 진입가 아님</small><b>{plan.interest?plan.interest.map(n=>formatPrice(n,market)).join(' – '):'미확정'}</b></div><div><small>진입 후보</small><b>{plan.entry?plan.entry.map(n=>formatPrice(n,market)).join(' – '):'없음 · 조건 확인 중'}</b></div><div><small>15분 손절 / 4H 목표</small><b>{plan.stop&&plan.target?formatPrice(plan.stop,market)+' / '+formatPrice(plan.target,market):'진입 조건 충족 후 표시'}</b></div></div><p>관심 구역은 기다릴 위치입니다. 그 중간값을 진입가로 쓰지 않습니다. 자동 계좌의 실제 계획·보유·체결은 모의투자 기록이 기준입니다.</p></section>;}
 
 function PriceChart({
   data,
@@ -1108,7 +1110,7 @@ function PriceChart({
       ? [(trendPlan?.entry[0]??0), (trendPlan?.entry[1]??0), (trendPlan?.stop??0), (trendPlan?.target??0)]
       : []),
   ].filter((value) => value >= autoFitMinimum && value <= autoFitMaximum);
-  const fittedMaximum = Math.max(candleMaximum, currentPrice, ...nearbyOverlayValues,...(showForecast&&trendPlan?[...trendPlan.entry,trendPlan.stop,trendPlan.target]:[]));
+  const fittedMaximum = Math.max(candleMaximum, currentPrice, ...nearbyOverlayValues);
   const fittedMinimum = Math.min(candleMinimum, currentPrice, ...nearbyOverlayValues,...(showForecast&&trendPlan?[...trendPlan.entry,trendPlan.stop,trendPlan.target]:[]));
   const fittedSpan = Math.max(fittedMaximum - fittedMinimum, visiblePriceSpan);
   const verticalPadding = fittedSpan * 0.12;
@@ -1172,7 +1174,7 @@ function PriceChart({
         ? [
             {
               key: 'forecast-entry',
-              label: `관심 구역 중심 ${formatPrice((trendPlan?(trendPlan.entry[0]+trendPlan.entry[1])/2:0), market)}`,
+              label: `진입 후보 ${formatPrice((trendPlan?(trendPlan.entry[0]+trendPlan.entry[1])/2:0), market)}`,
               value: (trendPlan?(trendPlan.entry[0]+trendPlan.entry[1])/2:0),
               tone: 'entry' as const,
             },
@@ -1292,7 +1294,7 @@ function PriceChart({
           <span
             className={`forecast-badge ${analysis.entryForecast.status.toLowerCase()}`}
           >
-            {showForecast ? trendPlan?.caption : !isViewingLatest?'최신 구간에서 상위 계획 표시':'4H 구조 확정 대기 · 임의 가격선 없음'}
+            {showForecast ? trendPlan?.caption : !isViewingLatest?'최신 구간에서 상위 계획 표시':'공통 계획의 진입 조건 대기 · 가격선 없음'}
           </span>
         )}
       </div>
@@ -1713,6 +1715,8 @@ function PriceChart({
                     y={label.labelY + 3}
                     textAnchor="end"
                     className="price-label-text"
+                    textLength={label.label.length>16?railEnd-railStart-12:undefined}
+                    lengthAdjust="spacingAndGlyphs"
                   >
                     {edgePrefix}
                     {label.label}
@@ -2445,7 +2449,7 @@ function PaperTrading({
         <PriceChart
           data={chartData}
           analysis={chartAnalysis}
-          trendPlan={trendMap(timeframeData)}
+          trendPlan={chartOverlay(evaluateChartPlan(timeframeData).tradePlan)}
           market={market}
           timeframe={timeframe}
           layers={layers}
@@ -3012,17 +3016,17 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         analyses: entryAnalyses,
         candles: timeframeData,
         capital: market==='KR'?10000000:10000,
+        entryFrame:planEntryFrame,
       }),
-    [entryAnalyses, timeframeSnapshots, timeframeData, market, liveUpdatedAt],
+    [entryAnalyses, timeframeSnapshots, timeframeData, market, liveUpdatedAt,planEntryFrame],
   );
-  const entryReference = entryAnalyses['1m'];
-  const riskPlan = multiTimeframeEntry.riskPlan;
-  const executionAnalysis = {...entryReference,
-    stop:riskPlan?.stop??0,target:riskPlan?.target??0,
-    rr:riskPlan?Math.abs(riskPlan.target-(entryReference.entry[0]+entryReference.entry[1])/2)/Math.max(Math.abs((entryReference.entry[0]+entryReference.entry[1])/2-riskPlan.stop),0.000001):0,
-    entryForecast:{...entryReference.entryForecast,zoneValid:entryReference.entryForecast.zoneValid&&!!riskPlan,status:multiTimeframeEntry.status==='READY'?'READY' as const:multiTimeframeEntry.status==='BLOCKED'?'AVOID' as const:'WAIT' as const,reasons:multiTimeframeEntry.steps.map(step=>({...step,state:step.state==='BLOCK'?'RISK' as const:step.state}))},
+  const commonPlan=multiTimeframeEntry.tradePlan;
+  const entryReference = entryAnalyses[planEntryFrame];
+  const executionAnalysis = {...entryReference,bias:commonPlan.direction,entry:commonPlan.entry??[0,0] as [number,number],
+    stop:commonPlan.stop??0,target:commonPlan.target??0,rr:commonPlan.netR,
+    entryForecast:{...entryReference.entryForecast,zoneValid:commonPlan.ready,status:commonPlan.ready?'READY' as const:'WAIT' as const,reasons:multiTimeframeEntry.steps.map(step=>({...step,state:step.state==='BLOCK'?'RISK' as const:step.state}))},
   };
-  const selectedDirection = directionLabel(executionAnalysis.bias);
+  const selectedDirection = commonPlan.direction==='NEUTRAL'?'방향 대기':(commonPlan.direction==='LONG'?'롱':'숏')+(commonPlan.ready?' 참고 조건 충족':' 계획 대기');
   function explainSignal(frame:Timeframe,label:string,bias:Analysis['bias']){
     const a=analyze(timeframeData[frame]), snap=timeframeSnapshots[frame];
     setSignalHelp({title:frame+' · '+label,at:new Date().toLocaleString('ko-KR'),direction:bias,sequence:snap.sequence,event:snap.event,protectedPrice:a.protectedPrice,weakPrice:a.weakPrice,steps:multiTimeframeEntry.steps.map(step=>({...step})),source:status});
@@ -3775,17 +3779,17 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             <div className="directive">
               <div>
                 <i />
-                <button type="button" onClick={()=>explainSignal('1m',selectedDirection,executionAnalysis.bias)} aria-label="종합 방향 신호의 판단 이유 보기"
+                <button type="button" onClick={()=>explainSignal('4H',selectedDirection,executionAnalysis.bias)} aria-label="종합 방향 신호의 판단 이유 보기"
                   className={`direction-chip ${executionAnalysis.bias.toLowerCase()}`}
                 >
                   {selectedDirection} ⓘ
                 </button>
                 <span>
-                  {executionAnalysis.bias} · 조건 충족 {executionAnalysis.confidence}/100 (승률 아님) · 1m 정제 기준 · 자동 진입은 순서·등급·비용 별도 검증
+                  {executionAnalysis.bias} · 조건 충족 {executionAnalysis.confidence}/100 (승률 아님) · {planEntryFrame} 정제 · 4H 거래 방향 · 자동 계좌의 관측 순서는 별도 확인
                 </span>
               </div>
               <h1>
-                {multiTimeframeEntry.summary}
+                {commonPlan.stage}
               </h1>
               <p>
                 {timeframeSnapshots[timeframe].event} · {timeframeContext} ·
@@ -3828,7 +3832,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             <aside className="tf-panel panel">
               <div className="panel-title">
                 <span>시간대 구조</span>
-                <small>시간대: 차트 · 방향 버튼: 설명</small>
+                <small>각 봉의 흐름 · 거래 계획은 4H 기준</small>
               </div>
               {timeframeRows.map(([name, snapshot]) =>
                 (() => {
@@ -3904,11 +3908,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                     ))}
                   </div>
                 </div>
-                <div className="trend-plan-note"><label>상위 계획의 진입 후보 <select value={planEntryFrame} onChange={e=>setPlanEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분 정제 참고</option><option value="5m">5분 정제 참고</option></select></label><p>7번 버튼을 켜면 모든 시간대에서 같은 4H 관심 구역·목표를 봅니다. 15분 손절 계획이 없으면 4H 구조 무효화 후보를 표시합니다. 하위 정제 구역은 유효한 후보가 있을 때만 표시하며 자동 계좌 설정을 바꾸지 않습니다. 보유 기간이나 목표 도달 시간을 예측하는 선은 아닙니다.</p></div>
+                <div className="trend-plan-note"><label>공통 계획의 진입 시간대 <select value={planEntryFrame} onChange={e=>setPlanEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분 정제</option><option value="5m">5분 정제</option></select></label><p>차트 시간대는 관찰 배율입니다. 바꿔도 거래 방향은 4H 기준을 유지합니다. 먼 가격은 축을 늘리지 않고 화면 밖 안내로 표시합니다.</p></div>
+                <CommonPlanCard plan={commonPlan} market={market}/>
                 <PriceChart
                   data={analysisData}
                   analysis={analysis}
-                  trendPlan={trendMap(timeframeData,multiTimeframeEntry.riskPlan,planEntryFrame)}
+                  trendPlan={chartOverlay(commonPlan)}
                   market={market}
                   timeframe={timeframe}
                   layers={layers}
@@ -4450,10 +4455,11 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       <Dialog open={Boolean(signalHelp)} onOpenChange={open=>{if(!open)setSignalHelp(null);}}>
         <DialogContent className="entry-reason-dialog signal-help-dialog">
           {signalHelp&&<><DialogHeader><DialogTitle>{signalHelp.title} · 왜 이렇게 판단했나요?</DialogTitle><DialogDescription>{signalHelp.at}에 클릭한 화면의 분석입니다. 아래 내용은 실제 체결 통지가 아닙니다.</DialogDescription></DialogHeader>
+          <section><h3>공통 거래 계획과 비교</h3><p>{commonPlan.direction==='SHORT'?'상위 거래 계획은 숏입니다. 하위 봉의 롱 우세는 이 하락 흐름 안의 반등일 수 있으며 별도 롱 진입 허용이 아닙니다.':commonPlan.direction==='LONG'?'상위 거래 계획은 롱입니다. 하위 봉의 숏 우세는 이 상승 흐름 안의 조정일 수 있으며 별도 숏 진입 허용이 아닙니다.':'상위 거래 방향을 아직 확정하지 못했습니다.'}</p><p>{commonPlan.stage}</p></section>
           <section><h3>먼저, 신호의 뜻</h3><p>{signalHelp.direction==='LONG'?'롱은 가격 상승을 예상하는 방향입니다. 현재 선택한 시간대의 구조가 상승 쪽으로 분류되어 이 신호가 표시됐습니다.':signalHelp.direction==='SHORT'?'숏은 가격 하락을 예상하는 방향입니다. 현재 선택한 시간대의 구조가 하락 쪽으로 분류되어 이 신호가 표시됐습니다.':'관망은 현재 구조가 중립이거나 전환 중이어서 한 방향을 정하기 어렵다는 뜻입니다.'}</p><p>‘우세’는 방향이 유리해 보인다는 뜻입니다. 시간대를 선택해도 방향 표시의 뜻은 바뀌지 않습니다. ‘우세’는 모든 진입 조건 충족이나 주문 체결을 의미하지 않습니다.</p></section>
           <section><h3>이 신호의 실제 근거</h3><p><b>고점·저점 순서:</b> {signalHelp.sequence}</p><p>HH는 더 높은 고점, HL은 더 높은 저점, LH는 더 낮은 고점, LL은 더 낮은 저점입니다. 작은 한 봉의 색이 아니라 이 구조의 방향을 봅니다.</p><p><b>최근 구조 사건:</b> {signalHelp.event}</p><p>BOS는 구조 돌파, CHoCH는 반대 방향 전환 경고입니다. 화살표 ↑는 상승, ↓는 하락 방향입니다. 전환 경고만으로 새 추세를 확정하지 않습니다.</p><p><b>보호 수준:</b> {signalHelp.protectedPrice??'미확정'} · <b>약한 극점:</b> {signalHelp.weakPrice??'미확정'}</p><p>보호 수준은 현재 구조가 유지되는지 확인하는 가격, 약한 극점은 추세 방향의 목표 후보입니다. 이 숫자를 자동 계좌의 확정 손절·목표로 바로 사용하지 마세요.</p></section>
           <section><h3>그럼 지금 진입해도 되나요?</h3><p>방향과 진입 허용은 다릅니다. 아래에서 ‘대기’나 ‘충돌’이 남아 있으면 방향 신호만 보고 진입하면 안 됩니다.</p>{signalHelp.steps.map(step=><div className="signal-check" key={step.label}><b>{step.label} · {step.state==='PASS'?'충족':step.state==='BLOCK'?'충돌':'대기'}</b><p>{step.detail}</p></div>)}<p>큰 봉에서 방향·관심 구역을 정하고, 구역 접촉 뒤 작은 봉의 전환과 재접촉을 기다리는 순서입니다. PP는 1시간 내부 방향이 거래 방향과 함께 움직이는지 확인하는 조건입니다.</p></section>
-          <section><h3>자동 모의매매와 연결해서 보기</h3><p>위 체크는 대시보드의 1분형 참고 분석입니다. 자동 계좌에서 선택한 1분/5분형의 실제 대기 사유와 저장된 계획을 따로 확인하세요. 새 모델은 15분 손절·4시간 목표를 먼저 정하고, 비용 차감 2R 이상과 위험 한도를 확인합니다. 2R은 계획한 손실 1에 비해 목표 이익이 2라는 의미입니다.</p><p>모든 참고 조건이 충족돼도 시세 지연, 관측 순서, 구역 등급, 수량 등의 검사로 자동 진입이 보류될 수 있습니다. 실제 진입 여부는 모의투자의 체결 기록으로 확인합니다.</p><p><b>현재 데이터 안내:</b> {signalHelp.source}</p><p>예시·지연 데이터의 방향은 실시간 매매 근거로 사용하지 마세요. 팝업은 클릭 시점 내용을 유지하며 최신 판단은 닫고 다시 눌러 확인합니다.</p></section>
+          <section><h3>자동 모의매매와 연결해서 보기</h3><p>위 체크는 대시보드에서 선택한 진입 시간대의 공통 참고 분석입니다. 자동 계좌에서 선택한 1분/5분형의 실제 대기 사유와 저장된 계획을 따로 확인하세요. 새 모델은 15분 손절·4시간 목표를 먼저 정하고, 비용 차감 2R 이상과 위험 한도를 확인합니다. 2R은 계획한 손실 1에 비해 목표 이익이 2라는 의미입니다.</p><p>모든 참고 조건이 충족돼도 시세 지연, 관측 순서, 구역 등급, 수량 등의 검사로 자동 진입이 보류될 수 있습니다. 실제 진입 여부는 모의투자의 체결 기록으로 확인합니다.</p><p><b>현재 데이터 안내:</b> {signalHelp.source}</p><p>예시·지연 데이터의 방향은 실시간 매매 근거로 사용하지 마세요. 팝업은 클릭 시점 내용을 유지하며 최신 판단은 닫고 다시 눌러 확인합니다.</p></section>
           <DialogFooter><button onClick={()=>setSignalHelp(null)}>확인</button></DialogFooter></>}
         </DialogContent>
       </Dialog>
