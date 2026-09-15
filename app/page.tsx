@@ -1,4 +1,5 @@
 'use client';
+import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
 
 import { qualifiedZone, closedBars } from '@/lib/auto-paper';
 import {
@@ -2565,10 +2566,11 @@ export default function Home(){
 }
 
 function GuidePage() {
-  const [guideTab, setGuideTab] = useState<'quick' | 'structure' | 'entry' | 'site' | 'cases' | 'review'>('quick');
+  const [guideTab, setGuideTab] = useState<'quick' | 'structure' | 'entry' | 'site' | 'cases' | 'review' | 'indicators'>('quick');
   const guideTabs = [
     ['quick', '빠른 시작', '분석 순서와 체크리스트'],
     ['structure', '시장 구조', 'Swing·BOS·CHoCH'],
+    ['indicators', '차트 지표', '버튼별 의미·활용·주의점'],
     ['entry', '가격·진입', '가격 영역과 실행 규칙'],
     ['site', '사이트 사용법', '기능별 실제 이용 순서'],
     ['cases', '기준 사례집', '강의 장면과 판단 비교'],
@@ -2593,7 +2595,7 @@ function GuidePage() {
   return (
     <section className="guide-page">
       <header className="guide-hero">
-        <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE · 2026.09.11 업데이트</div>
+        <div className="guide-kicker"><BookOpen size={16} /> STRUCTUREFLOW GUIDE · 2026.09.15 업데이트</div>
         <h1>복잡한 지표보다, 보는 순서를 기억하세요</h1>
         <p>4시간 구역 접촉에서 출발해 15분과 1분의 전환·재접촉을 차례대로 확인합니다.</p>
         <p>강의 주요 장면에서 확인한 원칙을 보수적으로 구현했습니다. 전체 강의의 모든 예외를 재현한 인증된 전략은 아니며, 아래의 시스템 규칙은 강의 원문과 구분합니다.</p>
@@ -2615,6 +2617,7 @@ function GuidePage() {
         </div>
       </header>
 
+      {guideTab === 'indicators' && <div id="guide-panel-indicators" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-indicators"><ChartIndicatorGuide/></div>}
       {guideTab === 'cases' && <div id="guide-panel-cases" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-cases"><LectureCasebook/></div>}
       {guideTab === 'review' && <div id="guide-panel-review" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-review"><EntryReviewPanel/></div>}
       {guideTab === 'quick' && <div id="guide-panel-quick" className="guide-tab-panel" role="tabpanel" aria-labelledby="guide-tab-quick">
@@ -2680,10 +2683,10 @@ function GuidePage() {
         <aside className="guide-screen-map">
           <h3>화면에서 무엇을 믿어야 하나요?</h3>
           <dl>
-            <div><dt>상단 진입·손절·목표</dt><dd><b>1m 정제</b><span>실제 실행 계획</span></dd></div>
+            <div><dt>상단 진입·손절·목표</dt><dd><b>상위 계획 참고</b><span>확정값은 자동 계좌에서 확인</span></dd></div>
             <div><dt>1D·4H·1H 차트</dt><dd><b>방향 참고</b><span>진입 가격선 없음</span></dd></div>
             <div><dt>15m 차트</dt><dd><b>기원 구역</b><span>상위 접촉 이후 전환·재접촉 확인</span></dd></div>
-            <div><dt>5m 차트</dt><dd><b>보조 확인</b><span>1분 진입 조건을 대신하지 않음</span></dd></div>
+            <div><dt>5m 차트</dt><dd><b>선택형 진입 확인</b><span>새 자동 실험에서 5분형 선택 가능</span></dd></div>
             <div><dt>1m 차트</dt><dd><b>진입 정제</b><span>완료 봉의 전환·재접촉 확인</span></dd></div>
           </dl>
         </aside>
