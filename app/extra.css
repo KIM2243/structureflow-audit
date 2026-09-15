@@ -2116,3 +2116,14 @@ button:disabled {
   .layer-toggles button,.paper-layer-toggles button{padding:8px 10px;}
   .chart-wrap>.chart-badges{flex-basis:100%;}
 }
+/* Timeframe rows use normal flow so separate controls cannot overlap. */
+.tf-row {height:auto;min-height:132px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:12px;overflow:hidden}
+.tf-row > .tf-chart-select {display:grid;gap:8px;min-width:0;width:100%;padding:0;margin:0;background:transparent;border:0;color:inherit;text-align:left;font:inherit;cursor:pointer}
+.tf-row > .tf-chart-select > div {display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.tf-row > .tf-chart-select > strong {display:block;margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.tf-row > .tf-chart-select > span {display:block;margin:0;font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.tf-row > button.tf-signal {position:static;inset:auto;display:block;justify-self:end;max-width:100%;min-height:30px;padding:5px 9px;margin:0;border:1px solid #39485b;border-radius:6px;background:#101923;font:700 11px Arial,sans-serif;line-height:1.4;text-decoration:none;white-space:normal;cursor:pointer}
+.tf-row > button.tf-signal.long {color:var(--green)}
+.tf-row > button.tf-signal.short {color:var(--red)}
+.tf-row > button.tf-signal.neutral {color:var(--amber)}
+.tf-row > button.tf-signal:hover {background:#202d3b}
