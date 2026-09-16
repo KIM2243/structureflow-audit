@@ -89,8 +89,7 @@ export function evaluateMultiTimeframeEntry({
             ? 'PASS'
             : 'WAIT',
       detail:
-        dailyDirection === 'NEUTRAL'
-          ? '일봉 구조가 전환 구간입니다.'
+        middleDirection === 'NEUTRAL' ? '4시간 방향이 미확정이므로 일봉과의 정렬을 판단하지 않습니다.' : dailyDirection === 'NEUTRAL' ? '일봉 구조가 전환 구간입니다.'
           : middleDirection !== 'NEUTRAL' &&
               dailyDirection !== middleDirection
             ? `일봉 ${directionText(dailyDirection)} 추세 안의 4시간 ${directionText(middleDirection)} 풀백 가능성을 봅니다.`
@@ -153,8 +152,7 @@ export function evaluateMultiTimeframeEntry({
               ? 'PASS'
               : 'WAIT',
       detail:
-        triggerDirection !== direction && triggerDirection !== 'NEUTRAL'
-          ? '1분 트리거가 상위 추세와 반대입니다.'
+        direction === 'NEUTRAL' ? '4시간 방향 확정 후 하위 트리거를 판단합니다.' : triggerDirection !== direction && triggerDirection !== 'NEUTRAL' ? '1분 트리거가 상위 추세와 반대입니다.'
           : triggered
             ? '1분 전환·포함·재접촉 · A/B등급 · 상위 계획 순 2R 확인 (차트 후보)'
             : !nativeReady||!fresh?'원본 1분봉 부족 또는 지연 · 진입 보류':'15분 재접촉 이후 1분 전환·재접촉·등급·상위 계획 순 2R 대기',
