@@ -3817,7 +3817,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
               <strong>
                 {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.target, market)}` : '—'}
               </strong>
-              <span>구조 목표 · {executionAnalysis.rr.toFixed(1)}R</span>
+              <span>구조 목표 · {commonPlan.ready?executionAnalysis.rr.toFixed(1)+'R':'미확정'}</span>
             </div>
             <button
               className="review"
@@ -4036,7 +4036,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <h3>
                   {executionAnalysis.entryForecast.zoneValid ? `${current.currency}${formatPrice(executionAnalysis.entry[0], market)} – ${formatPrice(executionAnalysis.entry[1], market)}` : '유효 구조 영역 대기'}
                 </h3>
-                <p>1분 진입·15분 손절·4시간 목표 참고 · 자동 실험은 선택한 1분/5분 진입의 관측 순서와 H1 PP·등급·비용을 별도 검증합니다.</p>
+                <p>{planEntryFrame} 진입·15분 손절·4시간 목표 참고 · 자동 실험은 선택한 1분/5분 진입의 관측 순서와 H1 PP·등급·비용을 별도 검증합니다.</p>
                 <ul className="forecast-reasons">
                   {executionAnalysis.entryForecast.reasons.map((reason) => (
                     <li
@@ -4068,14 +4068,14 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   </div>
                   <div>
                     <dt>R:R</dt>
-                    <dd className="positive">{executionAnalysis.rr.toFixed(1)}R</dd>
+                    <dd className="positive">{commonPlan.ready?executionAnalysis.rr.toFixed(1)+'R':'—'}</dd>
                   </div>
                 </dl>
               </article>
               <article className="plan confirm">
                 <header>
                   <span>
-                    <Target size={15} /> 확인 진입
+                    <Target size={15} /> 선택 봉 구조 참고
                   </span>
                   <b>{analysis.score >= 70 ? '후보' : '대기'}</b>
                 </header>
