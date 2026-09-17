@@ -1,6 +1,7 @@
 'use client';
 import type {TradePlan} from '@/lib/trade-plan';
 import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
+import { StructureTermHelp } from '@/components/structure-term-help';
 
 import { qualifiedZone, closedBars } from '@/lib/auto-paper';
 import {
@@ -3844,22 +3845,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                       className={`tf-row ${selected ? 'selected' : ''}`}
                       key={name}
                     >
-                      <button className="tf-chart-select" onClick={()=>setTimeframe(name)} aria-pressed={selected} aria-label={`${name} 차트 보기`}>
-                      <div>
-                        <b>{name}</b>
-                        <em
-                          className={
-                            snapshot.trend === 'BULLISH'
-                              ? 'bull'
-                              : snapshot.trend === 'BEARISH'
-                                ? 'wait'
-                                : 'trans'
-                          }
-                        >
-                          {snapshot.trend}
-                        </em>
+                      <div className="tf-term-heading">
+                        <button type="button" className="tf-frame-button" onClick={()=>setTimeframe(name)} aria-pressed={selected} aria-label={`${name} 차트 보기`}><b>{name}</b></button>
+                        <StructureTermHelp frame={name} snapshot={snapshot} candles={timeframeData[name]} />
                         <small className="tf-role">{timeframeRole(name)}</small>
                       </div>
+                      <button className="tf-chart-select" onClick={()=>setTimeframe(name)} aria-pressed={selected} aria-label={`${name} 구조 차트 보기`}>
                       <strong>{snapshot.sequence}</strong>
                       <span>{snapshot.event}</span>
                       </button>
