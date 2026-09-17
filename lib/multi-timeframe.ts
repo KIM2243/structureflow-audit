@@ -90,8 +90,7 @@ export function evaluateMultiTimeframeEntry({
             : 'WAIT',
       detail:
         middleDirection === 'NEUTRAL' ? '4시간 방향이 미확정이므로 일봉과의 정렬을 판단하지 않습니다.' : dailyDirection === 'NEUTRAL' ? '일봉 구조가 전환 구간입니다.'
-          : middleDirection !== 'NEUTRAL' &&
-              dailyDirection !== middleDirection
+          : dailyDirection !== middleDirection
             ? `일봉 ${directionText(dailyDirection)} 추세 안의 4시간 ${directionText(middleDirection)} 풀백 가능성을 봅니다.`
             : `일봉과 4시간이 ${directionText(dailyDirection)} 방향으로 정렬됐습니다.`,
     },

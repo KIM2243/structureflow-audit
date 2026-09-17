@@ -550,7 +550,7 @@ function marketStateLabel(state: string) {
   if (state === 'PRE') return '프리마켓';
   if (state === 'POST' || state === 'POSTPOST') return '애프터마켓';
   if (state === 'CLOSED') return '장 종료';
-  return '정상';
+  return '키움 수신';
 }
 
 function formatLookbackDuration(bars: number, timeframe: Timeframe) {
@@ -644,7 +644,7 @@ function liveQuoteStatus(
   quote: LiveQuote | undefined,
   error: LiveQuoteError | undefined,
 ) {
-  if (error) return quote ? '일시 오류' : '오류';
+  if (error) return '수신 중단';
   if (!quote) return '로딩 중';
   const updatedAt = Date.parse(quote.lastUpdated || quote.timestamp);
   if (
@@ -2789,7 +2789,7 @@ function GuidePage() {
             <h3>모의투자와 백테스트 활용법</h3>
             <div><b>모의투자</b><p>분석 대시보드와 별도의 종목·차트를 불러와 가상 주문을 연습합니다. 다른 메뉴를 보는 동안에도 불러온 종목의 5초 시세 조회는 계속됩니다.</p></div>
             <div><b>자동 모의투자 v3</b><p>새 실험은 15분 손절·4시간 목표 사전 고정과 1분·5분 진입 확인을 사용합니다. 같은 종목도 새 모델·진입형별로 별도 계좌를 생성하며 기존 v1/v2 기록과 보유 규칙은 유지합니다. 자동 패널에서 대기 사유, 추적 구역의 등급, 보유 수량, 진입·부분청산·청산 기록을 확인하고 CSV로 비교하세요. 버전이 다른 결과를 합쳐 해석하지 않습니다.</p></div>
-            <div><b>1분봉 공급과 대기 상태</b><p>원본 1분봉만 사용하며 5분봉을 나누어 만들지 않습니다. 차트는 Yahoo 원본 보조 시세를 표시할 수 있지만 자동 체결은 키움 원본만 허용합니다. 데이터가 부족하거나 지연되면 대기합니다. 차트가 보이는 동안 60초마다 갱신하며 선택한 시간대를 유지합니다.</p></div>
+            <div><b>1분봉 공급과 대기 상태</b><p>원본 1분봉만 사용하며 5분봉을 나누어 만들지 않습니다. 현재가·차트·자동 체결은 키움 원본만 사용하며 다른 제공처로 대체하지 않습니다. 국내 실전 데이터는 KRX+NXT 통합시장 기준입니다. 미국은 키움 API가 제공하는 세션의 원본을 시간대 필터 없이 사용합니다. 데이터가 부족하거나 지연되면 대기합니다. 차트가 보이는 동안 60초마다 갱신하며 선택한 시간대를 유지합니다.</p></div>
             <div><b>차트 후보와 자동 체결</b><p>차트 후보는 완료 봉으로 재구성한 검토 결과입니다. 자동 실험은 시작 이후 실제로 관측한 접촉 순서로 검증하며 과거 후보를 소급 체결하지 않습니다. 페이지가 열렸다는 사실만으로 백그라운드 실행을 판단하지 말고, 자동 패널의 최근 관측·상태 기록을 확인하세요.</p></div>
             <div><b>운영·데이터 이상 감지</b><p>자동 모의투자의 운영·데이터 상태에서 서버 신호, 종목 처리 시각, 마지막 정상 원본과 데이터 차단 사유를 확인합니다. 현재가 30초·1분봉 2분 초과 지연, 잘못된 종목·출처, 중복·역순·미래 시각 봉, 이전보다 오래된 시세 응답은 체결 계산을 보류합니다. 보유하지 않은 진입 후보는 초기화하고 정상 복구 이후 접촉부터 다시 관측합니다.</p><p>최근 10분 내 1분봉 간격 이상은 신규 진입을 보류합니다. 무거래·거래정지·휴장 가능성이 있으므로 장애 확정은 아닙니다. 유효한 시세가 있는 보유분은 계속 관리하지만 원본 자체가 잘못되거나 지연되면 청산도 대기합니다. 화면에 표시되는 상태 감지이며 외부 알림이나 서버 자동 복구 기능은 아닙니다.</p></div>
             <div><b>판단 당시 차트 재생</b><p>자동 모의투자의 ‘진입·대기·차단 판단 기록’을 펼쳐 기록별 ‘판단 당시 차트 재생’을 누릅니다. 4H·1H·15m·1m를 선택하고 이전·다음 봉, 재생, 탐색 막대로 당시 완료 봉을 확인합니다. 판단 근거는 마지막 시점에만 표시합니다. 이 기능은 저장 차트 열람이며 과거 봉마다 전략을 다시 실행하는 백테스트가 아닙니다.</p><p>업데이트 이후 정상 시세 판단부터 차트를 저장합니다. 최근 200건의 판단 기록과 함께 보관하며 오래된 차트는 삭제됩니다. 필요한 기록은 차트 재생 패널에서 내려받으세요. 저장하지 않은 과거 차트나 연결 실패 시점은 나중 데이터로 복원하지 않습니다.</p></div>
@@ -3053,16 +3053,17 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const currentLiveQuoteKey = liveQuoteKey({ ...current, market });
   const activeLiveQuote = liveQuotes[currentLiveQuoteKey];
   const displayedPrice = activeLiveQuote?.price ?? last;
+  const activeQuoteUnavailable = Boolean(liveError || liveErrors[currentLiveQuoteKey] || !activeLiveQuote || liveQuoteStatus(activeLiveQuote, undefined) === '오래됨');
 
   useEffect(() => {
     if (tab === 'analysis' || tab === 'backtest') {
-      document.title = `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
+      document.title = activeQuoteUnavailable ? `${current.name} / 시세 확인 대기` : `${current.name} / ${current.currency}${formatPrice(displayedPrice, market)}`;
     } else if (tab === 'admin') {
       document.title = '회원 관리 · StructureFlow';
     } else if (tab === 'guide') {
       document.title = '트레이딩 가이드 · StructureFlow';
     }
-  }, [current.currency, current.name, displayedPrice, market, tab]);
+  }, [current.currency, current.name, displayedPrice, activeQuoteUnavailable, market, tab]);
 
   const entryMidpoint = (executionAnalysis.entry[0] + executionAnalysis.entry[1]) / 2;
   const unitRisk = Math.max(Math.abs(entryMidpoint - executionAnalysis.stop), 0.000001);
@@ -3605,9 +3606,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
         </button>
         <div className="price">
           <strong>
-            {hasMarketSelection ? `${current.currency}${formatPrice(displayedPrice, market)}` : '--'}
+            {hasMarketSelection && activeLiveQuote ? `${current.currency}${formatPrice(activeLiveQuote.price, market)}` : '--'}
           </strong>
-          {activeLiveQuote ? (
+          {activeQuoteUnavailable ? <span>수신 중단 · 마지막 가격 참고</span> : activeLiveQuote ? (
             <span
               className={activeLiveQuote.change >= 0 ? 'positive' : 'negative'}
             >
@@ -3640,8 +3641,8 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
             const quoteKey = liveQuoteKey(item);
             const quote = liveQuotes[quoteKey];
             const quoteError = liveErrors[quoteKey];
-            const quoteState = liveQuoteStatus(quote, quoteError);
-            const stale = quoteState === '오래됨';
+            const quoteState = liveError ? '수신 중단' : liveQuoteStatus(quote, quoteError);
+            const stale = quoteState === '오래됨' || quoteState === '수신 중단';
             const displayName =
               item.market === 'KR' && item.name !== item.code
                 ? item.name
@@ -3679,9 +3680,9 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                       {quote.changePct.toFixed(2)}%
                     </em>
                     <small>
-                      {quoteError
-                        ? `${displayName} · 이전 정상 가격 유지`
-                        : displayName}
+                      {quoteError || liveError
+                        ? `${displayName} · 마지막 수신 가격 (현재가 아님)`
+                        : `${displayName} · ${quote.exchange || '키움'} · 수신 ${new Date(quote.lastUpdated).toLocaleTimeString('ko-KR')}`}
                     </small>
                   </>
                 ) : (
@@ -3725,7 +3726,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           <button type="button" onClick={openWatchlistSettings}>
             <Settings2 size={14} /> 종목 설정
           </button>
-          <small>5초 주기 · 키움 REST</small>
+          <small>5초 주기 · 키움 전용 · 수신 시각 기준</small>
         </div>
       </section>
       </>}
@@ -4807,4 +4808,3 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     </main>
   );
 }
-

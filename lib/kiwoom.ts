@@ -512,7 +512,9 @@ async function requestQuotePayload<T extends DomesticQuoteResponse>(
   const endpoint =
     request.market === 'KR' ? '/api/dostk/stkinfo' : '/api/us/mrkcond';
   const apiId = request.market === 'KR' ? 'ka10001' : 'usa20100';
-  const body: Record<string, string> = { stk_cd: request.symbol };
+  const body: Record<string, string> = {
+    stk_cd: request.market === 'KR' && config.mode === 'real' ? `${request.symbol}_AL` : request.symbol,
+  };
   if (request.market === 'US') body.stex_tp = request.exchange || 'ND';
 
   const page = await requestPayloadPage<T>({
@@ -1053,7 +1055,7 @@ export async function getCurrentPrice(
     market: request.market,
     symbol: request.symbol,
     name,
-    exchange: exchangeName(request.exchange),
+    exchange: request.market === 'KR' && config.mode === 'real' ? 'KRX+NXT (SOR)' : exchangeName(request.exchange),
     currency: request.market === 'KR' ? 'KRW' : 'USD',
     price,
     previousClose,
