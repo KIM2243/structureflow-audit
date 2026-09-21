@@ -877,7 +877,9 @@ function chartOverlay(plan:TradePlan):TrendMap|undefined{return plan.ready&&plan
 function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
  const levels=plan.ready?{entry:plan.entry,stop:plan.stop!,target:plan.target!}:plan.candidate;
  const price=(n?:number)=>n===undefined?'미확정':formatPrice(n,market);
- return <section className="common-plan-card clear-action-plan" aria-label="공통 거래 계획">
+ return <details className="common-plan-card clear-action-plan collapsible-plan" aria-label="공통 거래 계획">
+ <summary className="compact-plan-summary"><span className={plan.direction==='LONG'?'positive':plan.direction==='SHORT'?'negative':''}>{plan.direction==='LONG'?'롱':plan.direction==='SHORT'?'숏':'방향 미확정'}</span><span>{plan.ready?'진입 조건 충족 · 미체결':'진입 대기'}</span><span className="compact-entry-price">{plan.ready?'진입 가격':'진입 후보'}: {levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'미확정'}</span><span className="plan-expand-label" aria-hidden="true" /></summary>
+ <div className="plan-expanded-content">
  <header><strong>{plan.ready?'진입 조건 충족 · 체결 전 확인':'지금은 진입 대기'}</strong><span>{plan.direction==='LONG'?'매수 방향':plan.direction==='SHORT'?'숏 방향':'방향 미확정'} · {plan.stage}</span></header>
  <p className="plan-context">{plan.context}</p>
  <div className="common-plan-values">
@@ -891,7 +893,7 @@ function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
  {!plan.ready&&<p><b>다음 확인:</b> {plan.blockers?.[0]??plan.stage} · 후보 가격선은 주문·체결 표시가 아닙니다.</p>}
  <details><summary>왜 대기하나요? · 구조 조건과 추가 제한 구분</summary><ul>{plan.blockers?.map((reason,i)=><li key={i}>{reason}</li>)}</ul><p>15분 손절·4시간 목표, 0.1% 완충, A/B등급, H1 동행, 순 2R와 30분 제한은 현재 구현의 검증 설정입니다. 강의의 모든 거래에 적용되는 고정 공식으로 확인된 것은 아닙니다. 시세 오류·미래 데이터·중복 체결 방지는 별도 안전 검사입니다.</p></details>
  <p>이 화면은 차트 참고 계획입니다. 보유 중인 자동 계좌의 실제 진입·손절·목표는 모의투자에 저장된 값을 따릅니다.</p>
- </section>;
+ </div></details>;
 }
 
 function PriceChart({
