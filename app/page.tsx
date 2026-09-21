@@ -874,7 +874,25 @@ function evaluateChartPlan(data:Record<Timeframe,Candle[]>,entryFrame:'1m'|'5m'=
  return evaluateMultiTimeframeEntry({candles:data,entryFrame,capital,snapshots:Object.fromEntries(Object.entries(data).map(([f,rows])=>[f,structureSnapshot(rows)])) as Record<Timeframe,Snapshot>,analyses:{'1m':analyze(data['1m']),'5m':analyze(data['5m']),'15m':analyze(data['15m']),'1H':analyze(data['1H'])}});
 }
 function chartOverlay(plan:TradePlan):TrendMap|undefined{return plan.ready&&plan.entry&&plan.stop&&plan.target?{entry:plan.entry,stop:plan.stop,target:plan.target,caption:(plan.direction==='LONG'?'롱':'숏')+' · 공통 참고 계획 · '+plan.entryFrame+' 정제',entryFrame:plan.entryFrame}:undefined;}
-function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){return <section className="common-plan-card" aria-label="공통 거래 계획"><header><strong>{plan.direction==='LONG'?'롱 계획':plan.direction==='SHORT'?'숏 계획':'방향 미확정'}</strong><span>{plan.stage}</span><small>4H 기준 · {plan.entryFrame} 정제 · 차트 참고</small></header><div className="common-plan-values"><div><small>4H 관심 구역 · 진입가 아님</small><b>{plan.interest?plan.interest.map(n=>formatPrice(n,market)).join(' – '):'미확정'}</b></div><div><small>진입 후보</small><b>{plan.entry?plan.entry.map(n=>formatPrice(n,market)).join(' – '):'없음 · 조건 확인 중'}</b></div><div><small>15분 손절 / 4H 목표</small><b>{plan.stop&&plan.target?formatPrice(plan.stop,market)+' / '+formatPrice(plan.target,market):'진입 조건 충족 후 표시'}</b></div></div><p>관심 구역은 기다릴 위치입니다. 그 중간값을 진입가로 쓰지 않습니다. 자동 계좌의 실제 계획·보유·체결은 모의투자 기록이 기준입니다.</p></section>;}
+function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
+ const levels=plan.ready?{entry:plan.entry,stop:plan.stop!,target:plan.target!}:plan.candidate;
+ const price=(n?:number)=>n===undefined?'미확정':formatPrice(n,market);
+ return <section className="common-plan-card clear-action-plan" aria-label="공통 거래 계획">
+ <header><strong>{plan.ready?'진입 조건 충족 · 체결 전 확인':'지금은 진입 대기'}</strong><span>{plan.direction==='LONG'?'매수 방향':plan.direction==='SHORT'?'숏 방향':'방향 미확정'} · {plan.stage}</span></header>
+ <p className="plan-context">{plan.context}</p>
+ <div className="common-plan-values">
+ <div><small>① 기다릴 위치 · 4H 관심 구역</small><b>{plan.interest?plan.interest.map(n=>price(n)).join(' – '):'상위 구역 미확정'}</b></div>
+ <div><small>② {plan.entryFrame} 진입 구역 · {plan.ready?'조건 충족':'조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'하위 정제 전 · 진입가 없음'}</b></div>
+ <div><small>③ 손절 기준 · 15분 상위 구조</small><b className="negative">{price(levels?.stop)}</b></div>
+ <div><small>④ 익절 목표 · 4H 스윙 극점</small><b className="positive">{price(levels?.target)}</b></div>
+ </div>
+ <p>진입은 표시 구역에 재접촉하고 아래 조건을 확인한 뒤 판단합니다. 관심 구역의 중심을 진입가로 쓰지 않습니다. 작은 봉으로 이동해도 상위 손절·목표는 같은 계획을 봅니다.</p>
+ <p><b>보유·청산:</b> 진입 후 최초 손절·목표를 유지하고 4시간 구조 무효화를 확인합니다. 1분/5분 반대 신호만으로 익절하지 않으며, 목표를 임의로 늘리거나 손절을 넓히지 않습니다.</p>
+ {!plan.ready&&<p><b>다음 확인:</b> {plan.blockers?.[0]??plan.stage} · 후보 가격선은 주문·체결 표시가 아닙니다.</p>}
+ <details><summary>왜 대기하나요? · 구조 조건과 추가 제한 구분</summary><ul>{plan.blockers?.map((reason,i)=><li key={i}>{reason}</li>)}</ul><p>15분 손절·4시간 목표, 0.1% 완충, A/B등급, H1 동행, 순 2R와 30분 제한은 현재 구현의 검증 설정입니다. 강의의 모든 거래에 적용되는 고정 공식으로 확인된 것은 아닙니다. 시세 오류·미래 데이터·중복 체결 방지는 별도 안전 검사입니다.</p></details>
+ <p>이 화면은 차트 참고 계획입니다. 보유 중인 자동 계좌의 실제 진입·손절·목표는 모의투자에 저장된 값을 따릅니다.</p>
+ </section>;
+}
 
 function PriceChart({
   data,
@@ -886,6 +904,7 @@ function PriceChart({
   livePrice,
   trendPlan,
   higherZones = [],
+  referencePlan,
 }: {
   data: Candle[];
   analysis: Analysis;
@@ -896,6 +915,7 @@ function PriceChart({
   livePrice?: number;
   trendPlan?: TrendMap;
   higherZones?: HigherContext[];
+  referencePlan?: TradePlan;
 }) {
   const defaultTargetBars =
     timeframe === '1H' || timeframe === '4H' || timeframe === '1D'
@@ -1089,6 +1109,7 @@ function PriceChart({
   );
   const showForecast =
     layers.forecast && isViewingLatest && !!trendPlan;
+  const pendingPlan = layers.forecast && isViewingLatest && !referencePlan?.ready ? referencePlan?.candidate : undefined;
   const candleMaximum = Math.max(...displayed.map((candle) => candle.high));
   const candleMinimum = Math.min(...displayed.map((candle) => candle.low));
   const latestVisibleCandle = displayed.at(-1)!;
@@ -1178,6 +1199,11 @@ function PriceChart({
             tone: 'profile' as const,
           }))
         : []),
+      ...(pendingPlan ? [
+        ...(pendingPlan.entry?[{key:'pending-entry',label:'조건부 진입 '+pendingPlan.entry.map(n=>formatPrice(n,market)).join('–'),value:(pendingPlan.entry[0]+pendingPlan.entry[1])/2,tone:'entry' as const}]:[]),
+        {key:'pending-stop',label:'계획 손절 '+formatPrice(pendingPlan.stop,market),value:pendingPlan.stop,tone:'stop' as const},
+        {key:'pending-target',label:'계획 익절 '+formatPrice(pendingPlan.target,market),value:pendingPlan.target,tone:'target' as const},
+      ] : []),
       ...(showForecast
         ? [
             {
@@ -1303,7 +1329,7 @@ function PriceChart({
           <span
             className={`forecast-badge ${analysis.entryForecast.status.toLowerCase()}`}
           >
-            {showForecast ? trendPlan?.caption : !isViewingLatest?'최신 구간에서 상위 계획 표시':'공통 계획의 진입 조건 대기 · 가격선 없음'}
+            {showForecast ? trendPlan?.caption : pendingPlan ? '조건부 계획 · 진입 대기 · 15분 손절 / 4H 익절' : !isViewingLatest?'최신 구간에서 상위 계획 표시':'공통 계획의 진입 조건 대기 · 가격선 없음'}
           </span>
         )}
       </div>
@@ -1369,6 +1395,7 @@ function PriceChart({
             height={chartBottom - padding}
             className="price-axis-background"
           />
+          {pendingPlan&&<g aria-label="조건부 진입 및 상위 손절 익절 계획" pointerEvents="none">{[pendingPlan.stop,pendingPlan.target,...(pendingPlan.entry??[])].map((price,i)=>isPriceOnScale(price)?<line key={i} x1={padding} x2={plotRight} y1={y(price)} y2={y(price)} stroke={i===0?'#f06774':i===1?'#28d59a':'#52cddd'} strokeDasharray="7 5" opacity="0.8"/>:null)}</g>}
           <HigherContextOverlay zones={shownHigherZones} minimum={minimum} maximum={maximum} left={padding} right={plotRight} top={padding} bottom={chartBottom} y={y} />
           {supplyDemand && supplyDemand.zone.high>=minimum && supplyDemand.zone.low<=maximum && <g aria-label="확정 수요 공급 구역과 실험 등급">
             <title>{supplyDemand.zone.quality?.reasons.join(' · ')} · A≥4 / B=3 / C≤2 · 승률 아님</title>
@@ -3915,6 +3942,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <div className="trend-plan-note"><label>공통 계획의 진입 시간대 <select value={planEntryFrame} onChange={e=>setPlanEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분 정제</option><option value="5m">5분 정제</option></select></label><p>차트 시간대는 관찰 배율입니다. 바꿔도 거래 방향은 4H 기준을 유지합니다. 먼 가격은 축을 늘리지 않고 화면 밖 안내로 표시합니다.</p></div>
                 <CommonPlanCard plan={commonPlan} market={market}/>
                 <PriceChart
+                  referencePlan={commonPlan}
                   higherZones={higherContexts(timeframeData,commonPlan.asOf)}
                   data={analysisData}
                   analysis={analysis}

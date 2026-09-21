@@ -167,10 +167,31 @@ export function evaluateMultiTimeframeEntry({
       ? 'READY'
       : 'WAIT';
 
+  const tradePlan=composeTradePlan({direction,entryFrame,ready:status==='READY',stage:!nativeReady||!fresh?'데이터 확인 대기':!context?'4H 방향·구역 확정 대기':!h4Touch?'4H 관심 구역 접촉 대기':!m15?'15분 전환 대기':!m15Touch?'15분 재접촉 대기':!m1?'하위 전환·정제 대기':status!=='READY'?'재접촉·방향·등급·비용 확인 대기':'참고 진입 조건 충족',interest:context?.zone,refined:m1,risk:riskPlan,netR,asOf:now});
+  const opposite=triggerDirection!=='NEUTRAL'&&direction!=='NEUTRAL'&&triggerDirection!==direction;
+  tradePlan.context=direction==='NEUTRAL'?'상위 스윙 방향 미확정 → 신규 진입 대기':`4시간 ${directionText(direction)} 계획 · ${opposite?'하위 봉은 반대 방향의 반등·조정 중':triggerDirection==='NEUTRAL'?'하위 방향 확인 중':'하위 흐름도 같은 방향'} → ${tradePlan.ready?'참고 진입 조건 충족':'진입 대기'}`;
+  tradePlan.blockers=[
+    ...(!nativeReady?['데이터: 필요한 원본 봉 부족·오류']:[]),
+    ...(!fresh?['데이터: 현재 1분봉 지연·시각 확인 필요']:[]),
+    ...(!context?['구조: 4시간 방향·수요/공급 구역 미확정']:[]),
+    ...(context&&!h4Touch?['구조: 상위 구역 실제 접촉 대기']:[]),
+    ...(h4Touch&&!m15?['구조: 접촉 이후 15분 전환 구역 대기']:[]),
+    ...(m15&&!m15Touch?['구조: 15분 구역 재접촉 대기']:[]),
+    ...(m15Touch&&!m1?[`구조: ${entryMinutes}분 정제 구역 확정 대기`]:[]),
+    ...(m1&&!m1Touch?['구조: 정제 구역 재접촉 대기']:[]),
+    ...(m1&&current&&(current.close<m1.low||current.close>m1.high)?['실행: 현재 가격이 정제 구역 밖']:[]),
+    ...(m1&&now-m1.at>1800000?['추가 설정: 하위 신호 30분 유효시간 초과']:[]),
+    ...(m1&&!gradePass?['추가 설정: A/B 구역 등급 기준 미충족']:[]),
+    ...(m1&&netR<2?['추가 설정: 비용·수량 반영 순 2R 기준 미충족']:[]),
+    ...(confirmationDirection!==direction?['추가 설정: 1시간 내부 방향 동행 대기']:[]),
+    ...steps.filter(step=>step.timeframe!=='1D'&&step.state!=='PASS').map(step=>step.timeframe+' 확인: '+step.detail),
+  ];
+  // A crossed parent stop/target is not an actionable prospective plan.
+  if(tradePlan.candidate&&current&&(direction==='LONG'?(current.close<=tradePlan.candidate.stop||current.close>=tradePlan.candidate.target):(current.close>=tradePlan.candidate.stop||current.close<=tradePlan.candidate.target))){delete tradePlan.candidate;tradePlan.blockers.unshift('계획 무효: 가격이 상위 손절 또는 목표를 이미 통과함');}
   return {
     status,
     riskPlan,
-    tradePlan:composeTradePlan({direction,entryFrame,ready:status==='READY',stage:!nativeReady||!fresh?'데이터 확인 대기':!context?'4H 방향·구역 확정 대기':!h4Touch?'4H 관심 구역 접촉 대기':!m15?'15분 전환 대기':!m15Touch?'15분 재접촉 대기':!m1?'하위 전환·정제 대기':status!=='READY'?'재접촉·방향·등급·비용 확인 대기':'참고 진입 조건 충족',interest:context?.zone,refined:m1,risk:riskPlan,netR,asOf:now}),
+    tradePlan,
     direction,
     entryTimeframe,
     summary:
