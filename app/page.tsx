@@ -1,4 +1,5 @@
 'use client';
+import { PlanPriceHelp } from '@/components/plan-price-help';
 import { TopDownPanel } from '@/components/top-down-panel';
 import { HigherContextOverlay } from '@/components/higher-context-overlay';
 import { higherContexts, type HigherContext } from '@/lib/higher-context';
@@ -883,10 +884,10 @@ function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
  <header><strong>{plan.ready?'진입 조건 충족 · 체결 전 확인':'지금은 진입 대기'}</strong><span>{plan.direction==='LONG'?'매수 방향':plan.direction==='SHORT'?'숏 방향':'방향 미확정'} · {plan.stage}</span></header>
  <p className="plan-context">{plan.context}</p>
  <div className="common-plan-values">
- <div><small>① 기다릴 위치 · 4H 관심 구역</small><b>{plan.interest?plan.interest.map(n=>price(n)).join(' – '):'상위 구역 미확정'}</b></div>
- <div><small>② {plan.entryFrame} 진입 구역 · {plan.ready?'조건 충족':'조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'하위 정제 전 · 진입가 없음'}</b></div>
- <div><small>③ 손절 기준 · 15분 상위 구조</small><b className="negative">{price(levels?.stop)}</b></div>
- <div><small>④ 익절 목표 · 4H 스윙 극점</small><b className="positive">{price(levels?.target)}</b></div>
+ <div><small>① 기다릴 위치 · 4H 관심 구역</small><b>{plan.interest?plan.interest.map(n=>price(n)).join(' – '):'상위 구역 미확정'}</b><PlanPriceHelp kind="interest" plan={plan}/></div>
+ <div><small>② {plan.entryFrame} 진입 구역 · {plan.ready?'조건 충족':'조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'하위 정제 전 · 진입가 없음'}</b><PlanPriceHelp kind="entry" plan={plan}/></div>
+ <div><small>③ 손절 기준 · 15분 상위 구조</small><b className="negative">{price(levels?.stop)}</b><PlanPriceHelp kind="stop" plan={plan}/></div>
+ <div><small>④ 익절 목표 · 4H 스윙 극점</small><b className="positive">{price(levels?.target)}</b><PlanPriceHelp kind="target" plan={plan}/></div>
  </div>
  <p>진입은 표시 구역에 재접촉하고 아래 조건을 확인한 뒤 판단합니다. 관심 구역의 중심을 진입가로 쓰지 않습니다. 작은 봉으로 이동해도 상위 손절·목표는 같은 계획을 봅니다.</p>
  <p><b>보유·청산:</b> 진입 후 최초 손절·목표를 유지하고 4시간 구조 무효화를 확인합니다. 1분/5분 반대 신호만으로 익절하지 않으며, 목표를 임의로 늘리거나 손절을 넓히지 않습니다.</p>
