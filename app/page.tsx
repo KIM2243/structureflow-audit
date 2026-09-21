@@ -1,4 +1,7 @@
 'use client';
+import { TopDownPanel } from '@/components/top-down-panel';
+import { HigherContextOverlay } from '@/components/higher-context-overlay';
+import { higherContexts, type HigherContext } from '@/lib/higher-context';
 import type {TradePlan} from '@/lib/trade-plan';
 import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
 import { StructureTermHelp } from '@/components/structure-term-help';
@@ -101,7 +104,8 @@ type LayerKey =
   | 'volumeProfile'
   | 'orderflow'
   | 'liquidity'
-  | 'forecast';
+  | 'forecast'
+  | 'htfPOI';
 
 type SymbolItem = {
   code: string;
@@ -881,6 +885,7 @@ function PriceChart({
   seriesKey,
   livePrice,
   trendPlan,
+  higherZones = [],
 }: {
   data: Candle[];
   analysis: Analysis;
@@ -890,6 +895,7 @@ function PriceChart({
   seriesKey: string;
   livePrice?: number;
   trendPlan?: TrendMap;
+  higherZones?: HigherContext[];
 }) {
   const defaultTargetBars =
     timeframe === '1H' || timeframe === '4H' || timeframe === '1D'
@@ -1112,13 +1118,14 @@ function PriceChart({
       : []),
   ].filter((value) => value >= autoFitMinimum && value <= autoFitMaximum);
   const fittedMaximum = Math.max(candleMaximum, currentPrice, ...nearbyOverlayValues);
-  const fittedMinimum = Math.min(candleMinimum, currentPrice, ...nearbyOverlayValues,...(showForecast&&trendPlan?[...trendPlan.entry,trendPlan.stop,trendPlan.target]:[]));
+  const fittedMinimum = Math.min(candleMinimum, currentPrice, ...nearbyOverlayValues);
   const fittedSpan = Math.max(fittedMaximum - fittedMinimum, visiblePriceSpan);
   const verticalPadding = fittedSpan * 0.12;
   const maximum = fittedMaximum + verticalPadding;
   const minimum = fittedMinimum - verticalPadding;
   const isPriceOnScale = (value: number) =>
     value >= minimum && value <= maximum;
+  const shownHigherZones = layers.htfPOI && isViewingLatest ? higherZones : [];
   const scaledZones = visibleZones.filter(
     (zone) => zone.low <= maximum && zone.high >= minimum,
   );
@@ -1291,6 +1298,7 @@ function PriceChart({
         {layers.liquidity && (
           <span className="soft">Liquidity · {visibleLiquidity.length}</span>
         )}
+        {layers.htfPOI && (<> {shownHigherZones.map(zone => <span key={zone.frame} className="soft">HTF {zone.frame} {zone.direction==='LONG'?'수요':'공급'} · {zone.grade} · {formatPrice(zone.low,market)}–{formatPrice(zone.high,market)}{zone.low>maximum?' · 화면 위':zone.high<minimum?' · 화면 아래':''} · 진입가 아님</span>)}{!shownHigherZones.length && <span className="soft">{isViewingLatest?'상위 확정 구역 없음':'최신 구간에서 상위 구역 확인'}</span>}</>)}
         {layers.forecast && (
           <span
             className={`forecast-badge ${analysis.entryForecast.status.toLowerCase()}`}
@@ -1361,6 +1369,7 @@ function PriceChart({
             height={chartBottom - padding}
             className="price-axis-background"
           />
+          <HigherContextOverlay zones={shownHigherZones} minimum={minimum} maximum={maximum} left={padding} right={plotRight} top={padding} bottom={chartBottom} y={y} />
           {supplyDemand && supplyDemand.zone.high>=minimum && supplyDemand.zone.low<=maximum && <g aria-label="확정 수요 공급 구역과 실험 등급">
             <title>{supplyDemand.zone.quality?.reasons.join(' · ')} · A≥4 / B=3 / C≤2 · 승률 아님</title>
             <rect x={zoneLeft} y={clampedY(supplyDemand.zone.high)} width={Math.max(1,plotRight-zoneLeft)} height={Math.max(2,clampedY(supplyDemand.zone.low)-clampedY(supplyDemand.zone.high))} fill={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} fillOpacity="0.13" stroke={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} strokeDasharray="6 3"/>
@@ -2164,6 +2173,7 @@ function PaperTrading({
     orderflow: false,
     liquidity: false,
     forecast: false,
+    htfPOI: false,
   });
   const requestId = useRef(0);
   const timeframeData = useMemo(
@@ -2842,6 +2852,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     orderflow: false,
     liquidity: false,
     forecast: false,
+    htfPOI: false,
   });
   const [planEntryFrame,setPlanEntryFrame]=useState<'1m'|'5m'>('1m');
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -3497,6 +3508,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     { key: 'swingLabels', label: 'HH·HL·LH·LL' },
     { key: 'premiumDiscount', label: '2 Premium/Discount' },
     { key: 'supplyDemand', label: '3 수요·공급 등급' },
+    { key: 'htfPOI', label: '상위 관심 구역' },
     { key: 'liquidity', label: '4 유동성' },
     { key: 'internalStructure', label: '5 내부구조' },
     { key: 'choch', label: '6 CHoCH' },
@@ -3903,6 +3915,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <div className="trend-plan-note"><label>공통 계획의 진입 시간대 <select value={planEntryFrame} onChange={e=>setPlanEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분 정제</option><option value="5m">5분 정제</option></select></label><p>차트 시간대는 관찰 배율입니다. 바꿔도 거래 방향은 4H 기준을 유지합니다. 먼 가격은 축을 늘리지 않고 화면 밖 안내로 표시합니다.</p></div>
                 <CommonPlanCard plan={commonPlan} market={market}/>
                 <PriceChart
+                  higherZones={higherContexts(timeframeData,commonPlan.asOf)}
                   data={analysisData}
                   analysis={analysis}
                   trendPlan={chartOverlay(commonPlan)}
@@ -3973,43 +3986,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                   <i /> CALCULATED
                 </small>
               </div>
-              <article
-                className={`plan multi-timeframe-entry ${multiTimeframeEntry.status.toLowerCase()}`}
-              >
-                <header>
-                  <span>
-                    <Activity size={15} /> 멀티 타임프레임 진입
-                  </span>
-                  <b>{multiTimeframeEntry.status}</b>
-                </header>
-                <h3>{multiTimeframeEntry.summary}</h3>
-                <p>1D 배경부터 1m 진입 정제까지 순서대로 확인합니다.</p>
-                <ol className="entry-gate-steps">
-                  {multiTimeframeEntry.steps.map((step) => (
-                    <li key={step.timeframe} className={step.state.toLowerCase()}>
-                      <button
-                        type="button"
-                        className="entry-gate-button"
-                        onClick={() => setSelectedEntryStep(step)}
-                        aria-label={`${step.timeframe} ${step.label} 근거 자세히 보기`}
-                      >
-                        <strong>{step.timeframe}</strong>
-                        <div>
-                          <b>{step.label}</b>
-                          <small>{step.detail}</small>
-                        </div>
-                        <span>
-                          {step.state === 'PASS'
-                            ? '충족'
-                            : step.state === 'BLOCK'
-                              ? '차단'
-                              : '대기'}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-              </article>
+              <TopDownPanel result={multiTimeframeEntry} selected={timeframe} onDrillDown={setTimeframe} onExplain={setSelectedEntryStep} />
               <article className="plan early forecast-plan">
                 <header>
                   <span>

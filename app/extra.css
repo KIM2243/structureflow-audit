@@ -2138,3 +2138,4 @@ button:disabled {
 .structure-term-dialog{max-height:85dvh;overflow-y:auto;max-width:min(680px,calc(100vw - 28px));overflow-wrap:anywhere}
 .structure-term-dialog section{border-top:1px solid #293544;padding:14px 0}.structure-term-dialog h3{font-size:16px;margin:0 0 10px}.structure-term-dialog p,.structure-term-definitions{font-size:16px;line-height:1.8}
 .structure-term-definitions div{display:block;margin:12px 0}.structure-term-definitions dt{font-weight:700;color:#7bdcc7}.structure-term-definitions dd{margin:3px 0 0;color:#c0ccdb}
+.unified-topdown li{padding-bottom:8px}.unified-topdown .entry-gate-button[aria-pressed=true]{box-shadow:inset 3px 0 var(--green);background:#14251f}.gate-explain{display:block;margin:4px 10px 0 auto;padding:7px 10px;border:1px solid #33475b;border-radius:6px;background:#111c27;color:#bde9e2;font-size:13px;cursor:pointer}.gate-explain:focus-visible{outline:2px solid var(--green);outline-offset:2px}
