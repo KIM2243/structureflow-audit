@@ -717,10 +717,10 @@ function downloadTextFile(filename: string, content: string) {
 
 const formatTradeDate = (value: string) => value.slice(0, 16).replace('T', ' ');
 
-const DEFAULT_CHART_BARS = 120;
-const HIGHER_TIMEFRAME_CHART_BARS = 200;
+const DEFAULT_CHART_BARS = 800;
+const HIGHER_TIMEFRAME_CHART_BARS = 800;
 const MIN_CHART_BARS = 18;
-const MAX_CHART_BARS = 400;
+const MAX_CHART_BARS = 800;
 
 function clampChartValue(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));

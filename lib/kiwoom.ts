@@ -179,8 +179,8 @@ const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
 const CHART_REQUEST_DELAY_MS = 250;
 const MAX_CHART_PAGES = 20;
-const MAX_CHART_RECORDS = 2_000;
-const CHART_CANDLE_LIMIT = 400;
+const MAX_CHART_RECORDS = 4_000;
+const CHART_CANDLE_LIMIT = 800;
 
 let cachedToken: CachedToken | null = null;
 let tokenRequest: Promise<CachedToken> | null = null;
@@ -961,11 +961,11 @@ export async function getMarketChart(
   // so symbol switches do not wait for four full round trips in sequence,
   // while still avoiding a burst of simultaneous requests.
   const chartRequests = [
-    { scope: '5' as const, target: 440 },
-    { scope: '15' as const, target: 440 },
-    { scope: '60' as const, target: 1_800 },
-    { scope: '1D' as const, target: 440 },
-    ...(includeOneMinute ? [{ scope: '1' as const, target: 440 }] : []),
+    { scope: '5' as const, target: 840 },
+    { scope: '15' as const, target: 840 },
+    { scope: '60' as const, target: 3_400 },
+    { scope: '1D' as const, target: 840 },
+    ...(includeOneMinute ? [{ scope: '1' as const, target: 840 }] : []),
   ];
   const [fiveMinute, fifteenMinute, hourlyForAggregation, daily, oneMinute] =
     await Promise.all(
