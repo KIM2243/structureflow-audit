@@ -239,7 +239,7 @@ export function pivots(data: Candle[], window = 3) {
   return output;
 }
 
-function detectStructureEvents(
+export function detectStructureEvents(
   data: Candle[],
   structure: Pivot[],
   scope: StructureEvent['scope'],
@@ -638,7 +638,7 @@ export function analyze(data: Candle[]): Analysis {
     weakPrice: mapped.weakLevel?.price,
     confirmedRange: range,
     marketPhase: mapped.trend === 'TRANSITION' ? '스윙 전환 확인 대기'
-      : structureState.internalTrend === mapped.trend ? '스윙·내부 동행 (PP 후보)' : '스윙 내부 조정',
+      : structureState.internalTrend === mapped.trend ? '스윙·내부 동행' : '스윙 내부 조정',
     score: Math.round(score),
     bias,
     atr: currentAtr,

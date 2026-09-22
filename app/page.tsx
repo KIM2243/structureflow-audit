@@ -6,6 +6,8 @@ import { higherContexts, type HigherContext } from '@/lib/higher-context';
 import type {TradePlan} from '@/lib/trade-plan';
 import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
 import { StructureTermHelp } from '@/components/structure-term-help';
+import { MarketPhaseControls, MarketPhaseOverlay, MarketPhaseHelp, type PhaseSelection } from '@/components/market-phase-layer';
+import { marketPhaseTimeline, phaseAt, type Phase, type PhaseSide, type PhaseTimeline } from '@/lib/market-phases';
 
 import { qualifiedZone, closedBars } from '@/lib/auto-paper';
 import {
@@ -95,6 +97,7 @@ type AdminUser = AuthUser & {
 type UsExchange = 'NA' | 'ND' | 'NY';
 type Timeframe = '1m' | '5m' | '15m' | '1H' | '4H' | '1D';
 type LayerKey =
+  | 'marketPhases'
   | 'supplyDemand'
   | 'structure'
   | 'choch'
@@ -907,6 +910,7 @@ function PriceChart({
   livePrice,
   trendPlan,
   higherZones = [],
+  phaseTimeline,
   referencePlan,
 }: {
   data: Candle[];
@@ -918,6 +922,7 @@ function PriceChart({
   livePrice?: number;
   trendPlan?: TrendMap;
   higherZones?: HigherContext[];
+  phaseTimeline?: PhaseTimeline;
   referencePlan?: TradePlan;
 }) {
   const defaultTargetBars =
@@ -930,6 +935,9 @@ function PriceChart({
     end: data.length,
   });
   const [dragging, setDragging] = useState(false);
+  const [phaseSide,setPhaseSide]=useState<PhaseSide>('LONG');
+  const [phaseFilters,setPhaseFilters]=useState<Record<Phase,boolean>>({CC:true,CP:true,PC:true,PP:true});
+  const [phaseSelection,setPhaseSelection]=useState<PhaseSelection|null>(null);
   const seriesKeyRef = useRef(seriesKey);
   const dataLengthRef = useRef(data.length);
   const chartRef = useRef<SVGSVGElement | null>(null);
@@ -1286,6 +1294,8 @@ function PriceChart({
   return (
     <>
       {supplyDemand && <details className="chart-zone-details"><summary>{supplyDemand.direction==='LONG'?'수요':'공급'} 구역 {supplyDemand.zone.quality?.grade}등급 · 평가 근거</summary><p>{supplyDemand.zone.quality?.reasons.join(' · ')}</p><p>A ≥ 4점 · B 3점 · C ≤ 2점. 관측한 구조를 분류하는 실험 점수이며 승률이 아닙니다. 자동 진입은 H4·M15·M1의 A/B등급만 사용합니다.</p></details>}
+      {layers.marketPhases && <MarketPhaseControls side={phaseSide} onSide={setPhaseSide} enabled={phaseFilters} onToggle={p=>setPhaseFilters(prev=>({...prev,[p]:!prev[p]}))} current={phaseTimeline?phaseAt(phaseTimeline,Date.parse(data[endIndex-1]?.date)):undefined} error={phaseTimeline?.error??(!phaseTimeline?'이 화면에는 4H/1H 원본 데이터가 없습니다. 분석 대시보드에서 확인하세요.':undefined)} onExplain={s=>setPhaseSelection(structuredClone(s))}/>}
+      <MarketPhaseHelp selection={phaseSelection} onClose={()=>setPhaseSelection(null)}/>
     <div className="chart-wrap">
       <div className="chart-badges">
         <span>{timeframe}</span>
@@ -1400,6 +1410,7 @@ function PriceChart({
           />
           {pendingPlan&&<g aria-label="조건부 진입 및 상위 손절 익절 계획" pointerEvents="none">{[pendingPlan.stop,pendingPlan.target,...(pendingPlan.entry??[])].map((price,i)=>isPriceOnScale(price)?<line key={i} x1={padding} x2={plotRight} y1={y(price)} y2={y(price)} stroke={i===0?'#f06774':i===1?'#28d59a':'#52cddd'} strokeDasharray="7 5" opacity="0.8"/>:null)}</g>}
           <HigherContextOverlay zones={shownHigherZones} minimum={minimum} maximum={maximum} left={padding} right={plotRight} top={padding} bottom={chartBottom} y={y} />
+          {layers.marketPhases && phaseTimeline && <MarketPhaseOverlay timeline={phaseTimeline} side={phaseSide} enabled={phaseFilters} data={data} offset={offset} endIndex={endIndex} x={x} top={padding} bottom={chartBottom} left={padding} right={plotRight} onSelect={setPhaseSelection}/>}
           {supplyDemand && supplyDemand.zone.high>=minimum && supplyDemand.zone.low<=maximum && <g aria-label="확정 수요 공급 구역과 실험 등급">
             <title>{supplyDemand.zone.quality?.reasons.join(' · ')} · A≥4 / B=3 / C≤2 · 승률 아님</title>
             <rect x={zoneLeft} y={clampedY(supplyDemand.zone.high)} width={Math.max(1,plotRight-zoneLeft)} height={Math.max(2,clampedY(supplyDemand.zone.low)-clampedY(supplyDemand.zone.high))} fill={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} fillOpacity="0.13" stroke={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} strokeDasharray="6 3"/>
@@ -2204,6 +2215,7 @@ function PaperTrading({
     liquidity: false,
     forecast: false,
     htfPOI: false,
+    marketPhases: false,
   });
   const requestId = useRef(0);
   const timeframeData = useMemo(
@@ -2883,6 +2895,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     liquidity: false,
     forecast: false,
     htfPOI: false,
+    marketPhases: false,
   });
   const [planEntryFrame,setPlanEntryFrame]=useState<'1m'|'5m'>('1m');
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -3063,6 +3076,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     [entryAnalyses, timeframeSnapshots, timeframeData, market, liveUpdatedAt,planEntryFrame],
   );
   const commonPlan=multiTimeframeEntry.tradePlan;
+  const phaseTimeline=useMemo(()=>marketPhaseTimeline(timeframeData,commonPlan.asOf),[timeframeData,commonPlan.asOf]);
   const entryReference = entryAnalyses[planEntryFrame];
   const executionAnalysis = {...entryReference,bias:commonPlan.direction,entry:commonPlan.entry??[0,0] as [number,number],
     stop:commonPlan.stop??0,target:commonPlan.target??0,rr:commonPlan.netR,
@@ -3534,6 +3548,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
     (name) => [name, timeframeSnapshots[name]] as [Timeframe, Snapshot],
   );
   const layerOptions: Array<{ key: LayerKey; label: string }> = [
+    { key: 'marketPhases', label: '시장 단계 CC·CP·PC·PP' },
     { key: 'structure', label: '1 스윙구조' },
     { key: 'swingLabels', label: 'HH·HL·LH·LL' },
     { key: 'premiumDiscount', label: '2 Premium/Discount' },
@@ -3946,6 +3961,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                 <CommonPlanCard plan={commonPlan} market={market}/>
                 <PriceChart
                   referencePlan={commonPlan}
+                  phaseTimeline={phaseTimeline}
                   higherZones={higherContexts(timeframeData,commonPlan.asOf)}
                   data={analysisData}
                   analysis={analysis}
