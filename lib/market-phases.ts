@@ -58,6 +58,26 @@ export function phaseAt(timeline: PhaseTimeline, at: number) {
   return timeline.points.findLast(point=>point.at<=Math.min(at,timeline.through));
 }
 
+// Anchor a classification CHANGE to the candle containing its confirmation,
+// never to a retrospectively selected high/low or the viewport's first bar.
+export function phaseMarkers(timeline: PhaseTimeline, side: PhaseSide, data: Candle[], minutes: number) {
+  const markers: { index: number; phase: Phase; point: PhasePoint }[] = [];
+  let previous: Phase | null = null;
+  for (const point of timeline.points) {
+    if (point.at > timeline.through) break;
+    const phase = classifyPhase(side, point.swing, point.internal);
+    const changed = phase !== previous;
+    previous = phase;
+    if (!phase || !changed) continue;
+    const index = data.findIndex(b => {
+      const start = Date.parse(b.date);
+      return start < point.at && point.at <= start + minutes * 60_000;
+    });
+    if (index >= 0) markers.push({index, phase, point});
+  }
+  return markers;
+}
+
 export const phaseInfo: Record<Phase,{name:string;description:string;use:string;seconds:number;color:string}> = {
   CC:{name:'스윙 반대 · 내부 반대',description:'진입하려는 방향이 큰 스윙과 내부 흐름 모두에 역행합니다.',use:'강의에서는 가장 공격적인 단계로 설명합니다. 역추세 되돌림은 최소 1시간 CHoCH 확인을 기다리는 규칙을 제시합니다.',seconds:414,color:'#ef7887'},
   CP:{name:'스윙 반대 · 내부 동행',description:'큰 스윙과는 반대지만 내부 전환 방향을 따르는 되돌림 매매입니다.',use:'4H 또는 1H CHoCH 확인과 되돌릴 공간을 함께 봅니다. 상승 스윙의 디스카운트까지 내려온 뒤 숏을 계속 추격하는 것은 강의 사례의 취지와 다릅니다.',seconds:470,color:'#50d6b1'},
