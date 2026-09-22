@@ -1410,6 +1410,7 @@ function PriceChart({
           />
           {pendingPlan&&<g aria-label="조건부 진입 및 상위 손절 익절 계획" pointerEvents="none">{[pendingPlan.stop,pendingPlan.target,...(pendingPlan.entry??[])].map((price,i)=>isPriceOnScale(price)?<line key={i} x1={padding} x2={plotRight} y1={y(price)} y2={y(price)} stroke={i===0?'#f06774':i===1?'#28d59a':'#52cddd'} strokeDasharray="7 5" opacity="0.8"/>:null)}</g>}
           <HigherContextOverlay zones={shownHigherZones} minimum={minimum} maximum={maximum} left={padding} right={plotRight} top={padding} bottom={chartBottom} y={y} />
+          {layers.marketPhases && phaseTimeline && <MarketPhaseOverlay timeline={phaseTimeline} side={phaseSide} enabled={phaseFilters} data={data} offset={offset} endIndex={endIndex} x={x} top={padding} bottom={chartBottom} left={padding} right={plotRight} onSelect={setPhaseSelection}/>}
           {supplyDemand && supplyDemand.zone.high>=minimum && supplyDemand.zone.low<=maximum && <g aria-label="확정 수요 공급 구역과 실험 등급">
             <title>{supplyDemand.zone.quality?.reasons.join(' · ')} · A≥4 / B=3 / C≤2 · 승률 아님</title>
             <rect x={zoneLeft} y={clampedY(supplyDemand.zone.high)} width={Math.max(1,plotRight-zoneLeft)} height={Math.max(2,clampedY(supplyDemand.zone.low)-clampedY(supplyDemand.zone.high))} fill={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} fillOpacity="0.13" stroke={supplyDemand.direction==='LONG'?'#36c5a2':'#eb788a'} strokeDasharray="6 3"/>
@@ -1880,7 +1881,6 @@ function PriceChart({
             </g>
           )}
         </g>
-          {layers.marketPhases && phaseTimeline && <MarketPhaseOverlay timeline={phaseTimeline} side={phaseSide} enabled={phaseFilters} data={data} offset={offset} endIndex={endIndex} x={x} y={y} minutes={timeframeSizes[timeframe]*5} top={padding} bottom={chartBottom} left={padding} right={plotRight} onSelect={setPhaseSelection}/>}
       </svg>
     </div>
     </>

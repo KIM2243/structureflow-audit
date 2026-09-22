@@ -1,6 +1,6 @@
 'use client';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { classifyPhase, phaseMarkers, phaseInfo, type Phase, type PhasePoint, type PhaseSide, type PhaseTimeline } from '@/lib/market-phases';
+import { classifyPhase, phaseInfo, type Phase, type PhasePoint, type PhaseSide, type PhaseTimeline } from '@/lib/market-phases';
 import type { Candle } from '@/lib/engine';
 
 export const phaseKeys: Phase[] = ['CC','CP','PC','PP'];
@@ -16,35 +16,31 @@ export function MarketPhaseControls({side,onSide,enabled,onToggle,current,error,
       <button type="button" onClick={()=>onExplain({phase:phase??'CC',side,point:current})}>단계 뜻·판정 근거 ?</button>
     </div>
     <p>{error??(current?`이 화면 끝 기준 · ${side==='LONG'?'롱':'숏'} ${phase??'판정 대기'} / 반대 방향 ${classifyPhase(side==='LONG'?'SHORT':'LONG',current.swing,current.internal)??'판정 대기'} · 4H 스윙 ${direction(current.swing)} · 내부 ${direction(current.internal)} (${current.internalEvidence?.frame??'미확정'})`:'이 구간에는 확정된 상위 구조가 없습니다.')}</p>
-    <p>단계가 바뀐 확인 봉에 테두리와 라벨을 표시합니다. 롱 기준은 봉 아래, 숏 기준은 봉 위입니다. 라벨을 누르면 확인 시각과 근거를 볼 수 있습니다. 큰 봉 안의 여러 변화는 1시간 이하에서 더 정확히 구분하세요. 진입·체결 표시는 아닙니다.</p>
+    <p>색 띠와 세로선은 단계가 확인된 시간입니다. 진입 가격·체결 표시가 아닙니다. 띠를 눌러 당시 근거를 확인하세요. 일봉·4시간봉에서는 봉 안의 세부 변화가 합쳐질 수 있으므로 1시간 이하에서 확인하세요.</p>
   </section>;
 }
 
-export function MarketPhaseOverlay({timeline,side,enabled,data,offset,endIndex,x,y,minutes,top,bottom,left,right,onSelect}:{timeline:PhaseTimeline;side:PhaseSide;enabled:Record<Phase,boolean>;data:Candle[];offset:number;endIndex:number;x:(index:number)=>number;y:(price:number)=>number;minutes:number;top:number;bottom:number;left:number;right:number;onSelect:(s:PhaseSelection)=>void}) {
-  const occupied: {x:number;y:number}[]=[];
-  const markers=phaseMarkers(timeline,side,data,minutes).filter(m=>m.index>=offset&&m.index<endIndex&&enabled[m.phase]);
-  return <g aria-label={side==='LONG'?'롱 기준 시장 단계 확인 봉':'숏 기준 시장 단계 확인 봉'}>{markers.map((m,n)=>{
-    const bar=data[m.index], cx=x(m.index-offset), color=phaseInfo[m.phase].color;
-    const high=y(bar.high), low=y(bar.low);
-    if(low<top||high>bottom)return null;
-    const anchor=Math.max(top,Math.min(bottom,side==='LONG'?low:high));
-    const labelX=Math.max(left+23,Math.min(right-23,cx));
-    let labelY=Math.max(top+13,Math.min(bottom-13,anchor+(side==='LONG'?24:-24)));
-    for(let lane=0;lane<16&&occupied.some(p=>Math.abs(p.x-labelX)<49&&Math.abs(p.y-labelY)<27);lane++) {
-      const distance=24+27*(Math.floor(lane/2)+1);
-      const sign=(lane%2===0?1:-1)*(side==='LONG'?1:-1);
-      labelY=Math.max(top+13,Math.min(bottom-13,anchor+distance*sign));
-    }
-    occupied.push({x:labelX,y:labelY});
-    const half=Math.max(2,Math.min(11,Math.abs(x(1)-x(0))*.4));
-    const open=()=>onSelect({phase:m.phase,side,point:structuredClone(m.point)});
-    return <g key={m.point.at+'-'+n} className="market-phase-marker" role="button" tabIndex={0} aria-label={time(m.point.at)+' '+side+' '+m.phase+' 확인 봉 근거'} onPointerDown={e=>e.stopPropagation()} onClick={open} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}}} style={{cursor:'pointer'}}>
-      <title>{side+' '+m.phase+' · '+time(m.point.at)+' 확인 · 봉 시작 '+time(Date.parse(bar.date))+' · 진입 체결 아님'}</title>
-      <rect x={cx-half-2} y={Math.max(top,high)-2} width={half*2+4} height={Math.max(5,Math.min(bottom,low)-Math.max(top,high)+4)} fill={color} fillOpacity="0.12" stroke={color} strokeWidth="1.3"/>
-      <line x1={cx} y1={anchor} x2={labelX} y2={labelY} stroke={color} strokeWidth="1.2"/>
-      <circle cx={cx} cy={anchor} r="3" fill={color}/>
-      <rect x={labelX-22} y={labelY-12} width="44" height="24" rx="5" fill="#101922" stroke={color}/>
-      <text x={labelX} y={labelY+4.5} textAnchor="middle" fill={color} fontSize="14" fontWeight="700">{m.phase}</text>
+export function MarketPhaseOverlay({timeline,side,enabled,data,offset,endIndex,x,top,bottom,left,right,onSelect}:{timeline:PhaseTimeline;side:PhaseSide;enabled:Record<Phase,boolean>;data:Candle[];offset:number;endIndex:number;x:(index:number)=>number;top:number;bottom:number;left:number;right:number;onSelect:(s:PhaseSelection)=>void}) {
+  // Each candle is classified using only evidence available at its OPEN. A later
+  // confirmation is never painted backwards onto the signal/pivot candle.
+  const segments:{start:number;end:number;point:PhasePoint;phase:Phase}[]=[];
+  for(let i=offset;i<endIndex;i++) {
+    const at=Date.parse(data[i].date);
+    const point=timeline.points.findLast(p=>p.at<=Math.min(at,timeline.through));
+    const phase=point?classifyPhase(side,point.swing,point.internal):null;
+    if(!point||!phase||!enabled[phase])continue;
+    const previous=segments.at(-1);
+    if(previous&&previous.phase===phase&&previous.end===i)previous.end=i+1;
+    else segments.push({start:i,end:i+1,point,phase});
+  }
+  return <g aria-label={`${side==='LONG'?'롱':'숏'} 기준 시장 단계 위치`}>{segments.map(s=>{
+    const start=Math.max(left,x(s.start-offset)), end=s.end>=endIndex?right:Math.min(right,x(s.end-offset));
+    const color=phaseInfo[s.phase].color;
+    return <g key={s.start} role="button" tabIndex={0} aria-label={`${time(s.point.at)} ${side} ${s.phase} 근거`} onPointerDown={e=>e.stopPropagation()} onClick={()=>onSelect({phase:s.phase,side,point:structuredClone(s.point)})} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect({phase:s.phase,side,point:structuredClone(s.point)});}}} style={{cursor:'pointer'}}>
+      <title>{`${side} ${s.phase} · ${phaseInfo[s.phase].name} · ${time(s.point.at)} 확인 · 클릭하여 근거 보기`}</title>
+      <line x1={start} x2={start} y1={top} y2={bottom-26} stroke={color} strokeDasharray="3 6" opacity="0.35"/>
+      <rect x={start} y={bottom-25} width={Math.max(1,end-start)} height={24} fill={color} fillOpacity="0.22" stroke={color} strokeWidth="0.5"/>
+      {end-start>35&&<text x={(start+end)/2} y={bottom-8} textAnchor="middle" fill={color} fontSize="13">{s.phase}</text>}
     </g>;
   })}</g>;
 }
