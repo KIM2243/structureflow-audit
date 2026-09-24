@@ -1,5 +1,6 @@
 import {readFile,writeFile,rename,mkdir,readdir,stat,unlink,statfs} from 'node:fs/promises';
 import os from 'node:os';
+import {selectionEvidence,selectDetailed,attachTracking,SELECTION_POLICY} from '../lib/scan-selection.mjs';
 import {UNIVERSE,LIMITS,localParts,dueSession,resourceSafe,closingMinute} from '../lib/scan-policy.mjs';
 import {evaluateScanChart} from '../lib/scan-evaluate.ts';
 import {structureSnapshot} from '../lib/engine.ts';
@@ -19,30 +20,36 @@ for(const market of ['KR','US']){
  if(!session)continue;
  let old;try{old=JSON.parse(await readFile(`${dir}/latest-${market}.json`,'utf8'));}catch{}
  if(old?.date===session.date&&(old.status==='complete'||old.attempts>=3))continue;
- const report={version:1,market,date:session.date,closeAt:new Date(session.closeAt).toISOString(),generatedAt:new Date().toISOString(),status:'complete',attempts:old?.date===session.date?(old.attempts||0)+1:1,screened:0,analyzed:0,stale:0,errors:[],candidates:[],coverage:'고정 20종목 · 일봉 사전선별 후 최대 6종목 공통 거래 계획 분석',note:'본장 마감 후 수집한 참고 후보입니다. 마감 직후 데이터 확정 지연·시간외 반영 가능성이 있으므로 다음 장 진입 전 다시 확인하세요.'};
+ let previous;
+ const historyFiles=(await readdir(dir)).filter(n=>n.startsWith('report-'+market+'-')&&n.endsWith('.json')&&n.slice(10,20)<session.date).sort().reverse();
+ for(const file of historyFiles){try{const candidate=JSON.parse(await readFile(dir+'/'+file,'utf8'));if(candidate.status==='complete'){previous=candidate;break;}}catch{}}
+ const outcomes={};
+ const report={version:2,selectionPolicy:SELECTION_POLICY,market,date:session.date,closeAt:new Date(session.closeAt).toISOString(),generatedAt:new Date().toISOString(),status:'complete',attempts:old?.date===session.date?(old.attempts||0)+1:1,screened:0,analyzed:0,stale:0,errors:[],candidates:[],coverage:'고정 20종목 · 일봉 사전선별 후 최대 6종목 공통 거래 계획 분석',note:'본장 마감 후 수집한 참고 후보입니다. 마감 직후 데이터 확정 지연·시간외 반영 가능성이 있으므로 다음 장 진입 전 다시 확인하세요.'};
  try{
   const shortlist=[];
   for(const item of UNIVERSE[market].slice(0,LIMITS.universe)){
    try{const bars=await fetchData(item,'daily');report.screened++;
     if(!Array.isArray(bars)||!validBars(bars)||bars.length<40)throw new Error('INVALID_DAILY');
     const latest=bars.at(-1);if(localParts(Date.parse(latest.date),market).date!==session.date){report.stale++;continue;}
-    const trend=structureSnapshot(bars).trend;if(!['BULLISH','BEARISH'].includes(trend))continue;
-    const recent=bars.slice(-20),volume=recent.reduce((s,b)=>s+b.volume,0)/recent.length;
-    if(!volume||latest.volume<=0)continue;
-    // Liquidity preselection only, never a profitability/confidence score.
-    shortlist.push({item,liquidity:volume*latest.close});
+    const evidence=selectionEvidence(bars,market);
+    if(!evidence.eligible){outcomes[item.symbol]='탐색 제외: '+evidence.reasons.join(' · ');continue;}
+    const trend=structureSnapshot(bars).trend;
+    if(!['BULLISH','BEARISH'].includes(trend)&&!evidence.interest){outcomes[item.symbol]='일봉 방향 대기 · 상세 계획 미재분석';continue;}
+    shortlist.push({item,evidence});
    }catch(e){if(e.message==='RESOURCE_PAUSED')throw e;report.errors.push({symbol:item.symbol,reason:e.message});}
   }
-  for(const {item} of shortlist.sort((a,b)=>b.liquidity-a.liquidity).slice(0,LIMITS.detailed)){
+  for(const {item,evidence,selection} of selectDetailed(shortlist,LIMITS.detailed)){
    try{const chart=await fetchData(item,'chart');const latest=chart.timeframes?.['1m']?.filter(b=>Date.parse(b.date)<session.closeAt).at(-1);
     if(!latest||session.closeAt-Date.parse(latest.date)>5*60000)throw new Error('마감 부근 1분봉 부족');
     const result=evaluateScanChart(chart,session.closeAt);report.analyzed++;
-    if(result.plan.direction!=='NEUTRAL'&&result.plan.interest)report.candidates.push({...item,...result});
+    if(result.plan.direction!=='NEUTRAL'&&result.plan.interest)report.candidates.push({...item,...result,evidence,selection});
+    else outcomes[item.symbol]='공통 계획 관심 구역·방향 조건 해제';
    }catch(e){if(e.message==='RESOURCE_PAUSED')throw e;report.errors.push({symbol:item.symbol,reason:e.message});}
   }
   report.candidates.sort((a,b)=>Number(b.plan.ready)-Number(a.plan.ready)||(a.distance??Infinity)-(b.distance??Infinity));
   if(report.errors.length)report.status='partial';
   if(report.stale===report.screened&&report.screened>0)report.status='no_session';
  }catch(e){report.status=e.message==='RESOURCE_PAUSED'?'resource_paused':'failed';report.errors.push({symbol:'SYSTEM',reason:e.message});}
+ attachTracking(report,previous,outcomes);
  await persist(report);console.log(JSON.stringify({market,date:report.date,status:report.status,screened:report.screened,analyzed:report.analyzed,candidates:report.candidates.length}));
 }
