@@ -178,7 +178,7 @@ const DEFAULT_TIMEOUT_MS = 6_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
 const CHART_REQUEST_DELAY_MS = 250;
-const MAX_CHART_PAGES = 20;
+const MAX_CHART_PAGES = 40;
 const MAX_CHART_RECORDS = 4_000;
 const CHART_CANDLE_LIMIT = 800;
 
@@ -894,10 +894,11 @@ async function loadDomesticChart(
   target: number,
   config: KiwoomConfig,
   signal?: AbortSignal,
+  regularOnly = false,
 ) {
   const isDaily = scope === '1D';
   const chartSymbol =
-    config.mode === 'real' ? `${symbol}_AL` : symbol;
+    config.mode === 'real' && !regularOnly ? `${symbol}_AL` : symbol;
   const body: Record<string, string> = {
     stk_cd: chartSymbol,
     base_dt: daysAgoKey(0, 'Asia/Seoul'),
@@ -950,11 +951,12 @@ export async function getMarketChart(
   request: KiwoomQuoteRequest,
   signal?: AbortSignal,
   includeOneMinute = false,
+  regularOnly = false,
 ): Promise<KiwoomChart> {
   const config = readConfig();
   const load = (scope: '1' | '5' | '15' | '60' | '1D', target: number) =>
     request.market === 'KR'
-      ? loadDomesticChart(request.symbol, scope, target, config, signal)
+      ? loadDomesticChart(request.symbol, scope, target, config, signal, regularOnly)
       : loadUsChart(request, scope, target, config, signal);
 
   // The four native series are independent. Start them with a small stagger
@@ -963,7 +965,7 @@ export async function getMarketChart(
   const chartRequests = [
     { scope: '5' as const, target: 840 },
     { scope: '15' as const, target: 840 },
-    { scope: '60' as const, target: 3_400 },
+    { scope: '60' as const, target: 4_000 },
     { scope: '1D' as const, target: 840 },
     ...(includeOneMinute ? [{ scope: '1' as const, target: 840 }] : []),
   ];
@@ -990,7 +992,7 @@ export async function getMarketChart(
     currency: request.market === 'KR' ? 'KRW' : 'USD',
     source:
       request.market === 'KR'
-        ? `Kiwoom REST API · ${config.mode === 'real' ? '통합(SOR)' : 'KRX'}`
+        ? `Kiwoom REST API · ${config.mode === 'real' && !regularOnly ? '통합(SOR)' : 'KRX'}`
         : 'Kiwoom REST API',
     candles: lastCandles(fiveMinute),
     timeframes: {
@@ -1005,6 +1007,14 @@ export async function getMarketChart(
     `[kiwoom] chart loaded market=${request.market} symbol=${request.symbol} counts=5m:${chart.candles.length},15m:${chart.timeframes['15m'].length},1h:${chart.timeframes['1H'].length},4h:${chart.timeframes['4H'].length},1d:${chart.timeframes['1D'].length}`,
   );
   return chart;
+}
+
+// Lightweight first pass for the bounded after-close scanner. No quote polling.
+export async function getScanDaily(request: KiwoomQuoteRequest, signal?: AbortSignal) {
+  const config = readConfig();
+  return request.market === 'KR'
+    ? loadDomesticChart(request.symbol, '1D', 200, config, signal, true)
+    : loadUsChart(request, '1D', 200, config, signal);
 }
 
 export async function getCurrentPrice(

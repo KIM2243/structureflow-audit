@@ -84,6 +84,7 @@ import {
 import { mapMarketStructure } from '@/lib/market-structure';
 import { AutoPaperPanel } from '@/components/auto-paper-panel';
 import { AutoBacktestPanel } from '@/components/auto-backtest-panel';
+import { CandidatesPanel } from '@/components/candidates-panel';
 import { LectureCasebook } from '@/components/lecture-casebook';
 import { EntryReviewPanel } from '@/components/entry-review-panel';
 
@@ -2869,7 +2870,7 @@ function GuidePage() {
 function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const [market, setMarket] = useState<Market>('US');
   const [symbol, setSymbol] = useState('ONDS');
-  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'guide' | 'admin'>('analysis');
+  const [tab, setTab] = useState<'analysis' | 'paper' | 'backtest' | 'guide' | 'admin' | 'candidates'>('analysis');
   const [symbolQuery,setSymbolQuery]=useState('');
   const [discoveredSymbols,setDiscoveredSymbols]=useState<SymbolSearchResult[]>([]);
   const [data, setData] = useState<Candle[]>(() => demo());
@@ -3602,6 +3603,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           >
             트레이딩 가이드
           </button>
+          <button className={tab === 'candidates' ? 'active' : ''} onClick={() => setTab('candidates')}>오늘의 후보</button>
           {viewer.role === 'admin' && <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>회원 관리</button>}
         </nav>
         <div className="top-actions">
@@ -4153,7 +4155,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
           </section>
         </>
       )
-      ) : tab === 'paper' ? null : tab === 'guide' ? (
+      ) : tab === 'candidates' ? <CandidatesPanel onOpen={item=>{chooseSearchedSymbol({market:item.market,code:item.symbol,feed:item.symbol,name:item.name,currency:item.market==='KR'?'₩':'$',exchange:item.exchange,type:'주식',exchangeLabel:item.market==='KR'?'KRX':item.exchange||'ND'});setTimeframe('4H');setTab('analysis');}}/> : tab === 'paper' ? null : tab === 'guide' ? (
         <GuidePage />
       ) : tab === 'admin' ? (
         <AdminPanel viewer={viewer}/>

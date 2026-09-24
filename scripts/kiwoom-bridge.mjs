@@ -1,8 +1,11 @@
 import { createServer } from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {UNIVERSE,LIMITS} from '../lib/scan-policy.mjs';
 import { createRequestCache } from '../lib/bridge-request-cache.mjs';
 import {
   getCurrentPrice,
   getMarketChart,
+  getScanDaily,
   KiwoomError,
   parseQuoteRequests,
   quoteRequestKey,
@@ -129,6 +132,20 @@ const server = createServer(async (request, response) => {
     }
     if (!authorized(request)) {
       json(response, 401, { error: '브리지 인증에 실패했습니다.' });
+      return;
+    }
+    if (url.pathname === '/api/scan-source') {
+      const market=url.searchParams.get('market'),symbol=url.searchParams.get('symbol');
+      const item=UNIVERSE[market]?.find(item=>item.symbol===symbol);
+      if(!item){json(response,400,{error:'검색 대상 밖의 종목입니다.'});return;}
+      const kind=url.searchParams.get('kind')==='chart'?'chart':'daily';
+      const data=await cachedChart(`scan:${market}:${symbol}:${kind}`,()=>kind==='chart'?getMarketChart(item,AbortSignal.timeout(90000),true,true):getScanDaily(item,AbortSignal.timeout(20000)));
+      json(response,200,data);return;
+    }
+    if (url.pathname === '/api/candidates') {
+      const market=url.searchParams.get('market')==='KR'?'KR':'US';
+      try {const data=JSON.parse(await readFile(`/var/lib/structureflow-scan/latest-${market}.json`,'utf8'));json(response,200,{...data,universe:UNIVERSE[market],limits:LIMITS});}
+      catch(error){if(error.code!=='ENOENT')throw error;json(response,200,{market,status:'pending',candidates:[],universe:UNIVERSE[market],limits:LIMITS});}
       return;
     }
     if (url.pathname === '/api/quotes') {

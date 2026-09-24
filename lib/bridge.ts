@@ -13,7 +13,7 @@ export function isKiwoomBridgeConfigured() {
 }
 
 export async function fetchFromKiwoomBridge(
-  path: '/api/quotes' | '/api/market',
+  path: '/api/quotes' | '/api/market' | '/api/candidates',
   search: URLSearchParams,
   signal?: AbortSignal,
 ) {
