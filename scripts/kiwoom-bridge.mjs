@@ -106,12 +106,12 @@ async function market(url, response) {
 
   try {
     const includeOneMinute = url.searchParams.get('auto') === '1';
-    const chart = await cachedChart(`${market}:${exchange}:${symbol}:${includeOneMinute}`, () => getMarketChart({
+    const chart = await cachedChart(`${market}:${exchange}:${symbol}:${includeOneMinute}`, async () => ({ ...await getMarketChart({
       market,
       symbol,
       ...(market === 'US' ? { exchange } : {}),
-    }, undefined, includeOneMinute));
-    json(response, 200, { ...chart, fetchedAt: new Date().toISOString() });
+    }, undefined, includeOneMinute), fetchedAt: new Date().toISOString() }));
+    json(response, 200, chart);
   } catch (error) {
     const details = publicError(error);
     json(response, details.code === 'authentication' ? 503 : 502, details);

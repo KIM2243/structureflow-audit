@@ -363,6 +363,21 @@ export function structureSnapshot(data: Candle[]): Snapshot {
 function detectZones(data: Candle[]) {
   const orderBlocks: StructureZone[] = [];
   const fairValueGaps: StructureZone[] = [];
+  // One suffix pass replaces repeatedly copying/scanning every later candle.
+  // Index i+1 excludes the formation candle, preserving the original rules.
+  const lows = new Float64Array(data.length + 1);
+  const highs = new Float64Array(data.length + 1);
+  const closesLow = new Float64Array(data.length + 1);
+  const closesHigh = new Float64Array(data.length + 1);
+  lows[data.length] = closesLow[data.length] = Infinity;
+  highs[data.length] = closesHigh[data.length] = -Infinity;
+  for (let i = data.length - 1; i >= 0; i--) {
+    const c = data[i];
+    lows[i] = c.low < lows[i + 1] ? c.low : lows[i + 1];
+    highs[i] = c.high > highs[i + 1] ? c.high : highs[i + 1];
+    closesLow[i] = c.close < closesLow[i + 1] ? c.close : closesLow[i + 1];
+    closesHigh[i] = c.close > closesHigh[i + 1] ? c.close : closesHigh[i + 1];
+  }
 
   for (let index = 2; index < data.length; index += 1) {
     const candle = data[index];
@@ -378,7 +393,7 @@ function detectZones(data: Candle[]) {
         high,
         kind: 'BULLISH_FVG',
         label: 'Bull FVG',
-        active: !data.slice(index + 1).some((next) => next.low <= low),
+        active: !(lows[index + 1] <= low),
       });
     }
     if (candle.high < earlier.low) {
@@ -391,7 +406,7 @@ function detectZones(data: Candle[]) {
         high,
         kind: 'BEARISH_FVG',
         label: 'Bear FVG',
-        active: !data.slice(index + 1).some((next) => next.high >= high),
+        active: !(highs[index + 1] >= high),
       });
     }
 
@@ -415,9 +430,7 @@ function detectZones(data: Candle[]) {
           high: Math.max(source.open, source.close),
           kind: 'BULLISH_OB',
           label: 'Bull OB',
-          active: !data
-            .slice(index + 1)
-            .some((next) => next.close < source.low),
+          active: !(closesLow[index + 1] < source.low),
         });
         break;
       }
@@ -438,9 +451,7 @@ function detectZones(data: Candle[]) {
           high: source.high,
           kind: 'BEARISH_OB',
           label: 'Bear OB',
-          active: !data
-            .slice(index + 1)
-            .some((next) => next.close > source.high),
+          active: !(closesHigh[index + 1] > source.high),
         });
         break;
       }

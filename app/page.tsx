@@ -2946,6 +2946,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   const liveAbortController = useRef<AbortController | null>(null);
   const marketDataCache = useRef(new Map<string, MarketDataCacheEntry>());
   const marketAbortController = useRef<AbortController | null>(null);
+  const marketPendingKey = useRef('');
   const marketRequestId = useRef(0);
   const initialLoadStarted = useRef(false);
 
@@ -3046,7 +3047,6 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
   );
   const chartData = timeframeData[timeframe];
   const analysisData = chartData;
-  const analysis = useMemo(() => analyze(analysisData), [analysisData]);
   const timeframeSnapshots = useMemo(
     () =>
       Object.fromEntries(
@@ -3064,6 +3064,11 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       '1H': analyze(timeframeData['1H']),
     }),
     [timeframeData],
+  );
+  const analysis = useMemo(
+    () => timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '1H'
+      ? entryAnalyses[timeframe] : analyze(analysisData),
+    [timeframe, entryAnalyses, analysisData],
   );
   const multiTimeframeEntry = useMemo(
     () =>
@@ -3133,8 +3138,12 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       const itemMarket = 'market' in item ? item.market : market;
       const exchange = itemMarket === 'US' ? item.exchange || 'ND' : '';
       const cacheKey = `${itemMarket}:${item.code}:${exchange}`;
+      // Repeated clicks must not cancel/restart the same full chart download.
+      if (marketPendingKey.current === cacheKey && marketAbortController.current && !marketAbortController.current.signal.aborted) return;
       const requestId = ++marketRequestId.current;
       marketAbortController.current?.abort();
+      marketAbortController.current = null;
+      marketPendingKey.current = '';
       if(!refresh)setLoadedInstrumentKey('');
 
       const applyPayload = (payload: MarketDataCacheEntry['payload']) => {
@@ -3159,6 +3168,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
 
       const controller = new AbortController();
       marketAbortController.current = controller;
+      marketPendingKey.current = cacheKey;
       setLoading(true);
       setStatus(
         cached
@@ -3207,6 +3217,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
       } finally {
         if (marketAbortController.current === controller) {
           marketAbortController.current = null;
+          marketPendingKey.current = '';
           setLoading(false);
         }
       }

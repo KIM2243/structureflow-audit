@@ -177,7 +177,6 @@ const TOKEN_REFRESH_MARGIN_MS = 60_000;
 const DEFAULT_TIMEOUT_MS = 6_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
-const CHART_REQUEST_DELAY_MS = 250;
 const MAX_CHART_PAGES = 40;
 const MAX_CHART_RECORDS = 4_000;
 const CHART_CANDLE_LIMIT = 800;
@@ -846,7 +845,8 @@ async function collectChartRows<T extends ApiPayload>({
       break;
     }
     continuation = page.continuation;
-    await sleep(CHART_REQUEST_DELAY_MS, signal);
+    // requestPayloadPage applies the account-wide gate to every page/retry.
+    // A second delay here only holds up the final series after the queue drains.
   }
   return rows.slice(0, MAX_CHART_RECORDS);
 }
@@ -959,9 +959,8 @@ export async function getMarketChart(
       ? loadDomesticChart(request.symbol, scope, target, config, signal, regularOnly)
       : loadUsChart(request, scope, target, config, signal);
 
-  // The four native series are independent. Start them with a small stagger
-  // so symbol switches do not wait for four full round trips in sequence,
-  // while still avoiding a burst of simultaneous requests.
+  // All native series share the account-wide request gate, including retries.
+  // Queue them directly; do not add a second per-series throttling delay.
   const chartRequests = [
     { scope: '5' as const, target: 840 },
     { scope: '15' as const, target: 840 },
@@ -971,12 +970,7 @@ export async function getMarketChart(
   ];
   const [fiveMinute, fifteenMinute, hourlyForAggregation, daily, oneMinute] =
     await Promise.all(
-      chartRequests.map(async ({ scope, target }, index) => {
-        if (index > 0) {
-          await sleep(index * CHART_REQUEST_DELAY_MS, signal);
-        }
-        return load(scope, target);
-      }),
+      chartRequests.map(({ scope, target }) => load(scope, target)),
     );
 
   if (!fiveMinute.length) {
