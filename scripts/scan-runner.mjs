@@ -1,5 +1,6 @@
 import {readFile,writeFile,rename,mkdir,readdir,stat,unlink,statfs} from 'node:fs/promises';
 import os from 'node:os';
+import {newTelemetry,observe,finishTelemetry} from '../lib/scan-telemetry.mjs';
 import {selectionEvidence,selectDetailed,attachTracking,SELECTION_POLICY} from '../lib/scan-selection.mjs';
 import {UNIVERSE,LIMITS,localParts,dueSession,resourceSafe,closingMinute} from '../lib/scan-policy.mjs';
 import {evaluateScanChart} from '../lib/scan-evaluate.ts';
@@ -10,8 +11,10 @@ const token=process.env.KIWOOM_BRIDGE_TOKEN;
 if(!token)throw new Error('Scanner credential missing');
 await mkdir(dir,{recursive:true});
 const started=Date.now(),deadline=started+LIMITS.minutes*60000;
-async function guard(){const mem=await readFile('/proc/meminfo','utf8'),available=Number(/MemAvailable:\s+(\d+)/.exec(mem)?.[1]||0)/1024,fs=await statfs(dir);if(Date.now()>deadline||!resourceSafe({availableMiB:available,freeBytes:fs.bavail*fs.bsize,load:os.loadavg()[0]}))throw new Error('RESOURCE_PAUSED');}
-async function fetchData(item,kind){await guard();const u=new URL('http://127.0.0.1:8790/api/scan-source');u.search=new URLSearchParams({market:item.market,symbol:item.symbol,kind}).toString();const r=await fetch(u,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(Math.min(95000,deadline-Date.now()))});if(!r.ok)throw new Error(`DATA_${r.status}`);return r.json();}
+let telemetry;
+async function guard(){const mem=await readFile('/proc/meminfo','utf8'),available=Number(/MemAvailable:\s+(\d+)/.exec(mem)?.[1]||0)/1024,fs=await statfs(dir);if(telemetry)observe(telemetry,{availableMiB:available,freeBytes:fs.bavail*fs.bsize,load:os.loadavg()[0]});if(Date.now()>deadline||!resourceSafe({availableMiB:available,freeBytes:fs.bavail*fs.bsize,load:os.loadavg()[0]}))throw new Error('RESOURCE_PAUSED');}
+async function fetchData(item,kind){await guard();const began=Date.now();telemetry.requests++;try{const u=new URL('http://127.0.0.1:8790/api/scan-source');u.search=new URLSearchParams({market:item.market,symbol:item.symbol,kind}).toString();const r=await fetch(u,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(Math.max(1,Math.min(95000,deadline-Date.now())))});if(!r.ok)throw new Error('DATA_'+r.status);return await r.json();}catch(e){telemetry.failedRequests++;throw e;}finally{telemetry.maxRequestMs=Math.max(telemetry.maxRequestMs,Date.now()-began);}}
+
 async function persist(report){const files=(await readdir(dir)).filter(n=>/^report-(KR|US)-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();while(files.length>=LIMITS.reports)await unlink(`${dir}/${files.shift()}`);const sizes=await Promise.all((await readdir(dir)).map(async n=>(await stat(`${dir}/${n}`)).size));if(sizes.reduce((a,b)=>a+b,0)>LIMITS.storageBytes)throw new Error('REPORT_STORAGE_LIMIT');const body=JSON.stringify(report);if(Buffer.byteLength(body)>128*1024)throw new Error('REPORT_SIZE_LIMIT');for(const name of [`report-${report.market}-${report.date}.json`,`latest-${report.market}.json`]){await writeFile(`${dir}/${name}.tmp`,body,{mode:0o640});await rename(`${dir}/${name}.tmp`,`${dir}/${name}`);}}
 for(const market of ['KR','US']){
  let session=dueSession(market);
@@ -23,8 +26,10 @@ for(const market of ['KR','US']){
  let previous;
  const historyFiles=(await readdir(dir)).filter(n=>n.startsWith('report-'+market+'-')&&n.endsWith('.json')&&n.slice(10,20)<session.date).sort().reverse();
  for(const file of historyFiles){try{const candidate=JSON.parse(await readFile(dir+'/'+file,'utf8'));if(candidate.status==='complete'){previous=candidate;break;}}catch{}}
+ telemetry=newTelemetry(old?.date===session.date?(old.resources||{state:old.status==='resource_paused'?'protected':'unknown'}):undefined);
+ const runStarted=Date.now(),cpuStarted=process.cpuUsage();
  const outcomes={};
- const report={version:2,selectionPolicy:SELECTION_POLICY,market,date:session.date,closeAt:new Date(session.closeAt).toISOString(),generatedAt:new Date().toISOString(),status:'complete',attempts:old?.date===session.date?(old.attempts||0)+1:1,screened:0,analyzed:0,stale:0,errors:[],candidates:[],coverage:'고정 20종목 · 일봉 사전선별 후 최대 6종목 공통 거래 계획 분석',note:'본장 마감 후 수집한 참고 후보입니다. 마감 직후 데이터 확정 지연·시간외 반영 가능성이 있으므로 다음 장 진입 전 다시 확인하세요.'};
+ const report={version:2,scopeCount:LIMITS.universe,selectionPolicy:SELECTION_POLICY,market,date:session.date,closeAt:new Date(session.closeAt).toISOString(),generatedAt:new Date().toISOString(),status:'complete',attempts:old?.date===session.date?(old.attempts||0)+1:1,screened:0,analyzed:0,stale:0,errors:[],candidates:[],coverage:`고정 ${LIMITS.universe}종목 · 일봉 사전선별 후 최대 6종목 공통 거래 계획 분석`,note:'본장 마감 후 수집한 참고 후보입니다. 마감 직후 데이터 확정 지연·시간외 반영 가능성이 있으므로 다음 장 진입 전 다시 확인하세요.'};
  try{
   const shortlist=[];
   for(const item of UNIVERSE[market].slice(0,LIMITS.universe)){
@@ -50,6 +55,9 @@ for(const market of ['KR','US']){
   if(report.errors.length)report.status='partial';
   if(report.stale===report.screened&&report.screened>0)report.status='no_session';
  }catch(e){report.status=e.message==='RESOURCE_PAUSED'?'resource_paused':'failed';report.errors.push({symbol:'SYSTEM',reason:e.message});}
+ const cpu=process.cpuUsage(cpuStarted);
+ report.resources=finishTelemetry(telemetry,{elapsedMs:Date.now()-runStarted,cpuMs:(cpu.user+cpu.system)/1000,status:report.status});
+ report.resourceHistory=[...(old?.resourceHistory||previous?.resourceHistory||[]).filter(h=>h.date<session.date),{date:session.date,scopeCount:LIMITS.universe,state:report.resources.state,minAvailableMiB:report.resources.minAvailableMiB,maxLoad:report.resources.maxLoad,elapsedMs:report.resources.elapsedMs}].slice(-5);
  attachTracking(report,previous,outcomes);
  await persist(report);console.log(JSON.stringify({market,date:report.date,status:report.status,screened:report.screened,analyzed:report.analyzed,candidates:report.candidates.length}));
 }

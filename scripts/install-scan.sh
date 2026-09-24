@@ -7,7 +7,7 @@ backup="$base/backup-scan-$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -m 700 "$backup"
 cp -p "$base/lib/kiwoom.ts" "$backup/kiwoom.ts"
 cp -p "$base/scripts/kiwoom-bridge.mjs" "$backup/kiwoom-bridge.mjs"
-for name in kiwoom.ts scan-policy.mjs scan-selection.mjs scan-evaluate.ts engine.ts market-structure.ts multi-timeframe.ts trade-plan.ts auto-paper.ts; do install -m 644 "lib/$name" "$base/lib/$name"; done
+for name in kiwoom.ts scan-policy.mjs scan-selection.mjs scan-telemetry.mjs scan-evaluate.ts engine.ts market-structure.ts multi-timeframe.ts trade-plan.ts auto-paper.ts; do install -m 644 "lib/$name" "$base/lib/$name"; done
 for name in kiwoom-bridge.mjs scan-runner.mjs; do install -m 644 "scripts/$name" "$base/scripts/$name"; done
 "$node" --experimental-strip-types --check "$base/lib/kiwoom.ts"
 "$node" --check "$base/scripts/scan-runner.mjs"
