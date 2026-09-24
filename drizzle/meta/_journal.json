@@ -36,6 +36,13 @@
       "when": 1789139351968,
       "tag": "0004_bouncy_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790273326772,
+      "tag": "0005_reset_admin_password",
+      "breakpoints": true
     }
   ]
 }

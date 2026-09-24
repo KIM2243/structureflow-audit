@@ -35,7 +35,7 @@ export async function getUser(request: Request): Promise<AuthUser | null> {
 export async function userCount() {
   return Number((await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first<{count:number}>())?.count || 0);
 }
-export function validPassword(password: string) { return password.length >= 12 && /[A-Za-z]/.test(password) && /\d/.test(password); }
+export { validPassword } from './password-policy';
 export function validUsername(username: string) { return /^[A-Za-z0-9._-]{3,40}$/.test(username); }
 export async function createUser(input: { username: string; displayName: string; password: string; role: 'admin'|'member' }) {
   const salt=randomHex(16), now=Date.now(), id=crypto.randomUUID();
