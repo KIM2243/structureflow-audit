@@ -58,6 +58,31 @@ export function phaseAt(timeline: PhaseTimeline, at: number) {
   return timeline.points.findLast(point=>point.at<=Math.min(at,timeline.through));
 }
 
+export function phasePendingReasons(point?: PhasePoint, error?: string): string[] {
+  if(error) return [error, '4H/1H 데이터가 정상적으로 준비된 뒤 다시 판정합니다.'];
+  if(!point) return ['이 시점까지 확인된 4H 스윙·내부 구조 근거가 없습니다. 이후 봉의 정보를 과거에 적용하지 않습니다.'];
+  const reasons: string[]=[];
+  if(point.swing==='TRANSITION') reasons.push(point.swingEvidence?.kind==='CHOCH'
+    ? '4H 스윙 CHoCH(기존 구조 변화)는 확인됐지만, 새 스윙 방향을 확정할 후속 BOS(구조 돌파)가 아직 없습니다. 사이트는 그때까지 스윙을 미확정으로 처리합니다.'
+    : '4H 스윙 방향을 확정할 BOS(구조 돌파) 근거가 아직 없습니다.');
+  if(point.internal==='TRANSITION') reasons.push('4H/1H 내부 방향이 미확정입니다. 완료된 봉에서 내부 구조 방향이 확인되어야 합니다.');
+  return reasons;
+}
+
+export function marketPhaseSegments(timeline: PhaseTimeline, side: PhaseSide, data: Candle[], offset: number, endIndex: number) {
+  const segments: {start:number;end:number;point?:PhasePoint;phase:Phase|null;at:number;error?:string}[]=[];
+  for(let i=offset;i<endIndex;i++) {
+    const at=Date.parse(data[i].date);
+    const point=timeline.error?undefined:phaseAt(timeline,at);
+    const phase=point?classifyPhase(side,point.swing,point.internal):null;
+    const previous=segments.at(-1);
+    // Preserve evidence changes even when the two-letter phase stays the same.
+    if(previous&&previous.phase===phase&&previous.point===point) previous.end=i+1;
+    else segments.push({start:i,end:i+1,point,phase,at:Math.min(at,timeline.through),error:timeline.error});
+  }
+  return segments;
+}
+
 export const phaseInfo: Record<Phase,{name:string;description:string;use:string;seconds:number;color:string}> = {
   CC:{name:'스윙 반대 · 내부 반대',description:'진입하려는 방향이 큰 스윙과 내부 흐름 모두에 역행합니다.',use:'강의에서는 가장 공격적인 단계로 설명합니다. 역추세 되돌림은 최소 1시간 CHoCH 확인을 기다리는 규칙을 제시합니다.',seconds:414,color:'#ef7887'},
   CP:{name:'스윙 반대 · 내부 동행',description:'큰 스윙과는 반대지만 내부 전환 방향을 따르는 되돌림 매매입니다.',use:'4H 또는 1H CHoCH 확인과 되돌릴 공간을 함께 봅니다. 상승 스윙의 디스카운트까지 내려온 뒤 숏을 계속 추격하는 것은 강의 사례의 취지와 다릅니다.',seconds:470,color:'#50d6b1'},
