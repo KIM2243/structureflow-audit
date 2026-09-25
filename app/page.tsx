@@ -879,12 +879,21 @@ function evaluateChartPlan(data:Record<Timeframe,Candle[]>,entryFrame:'1m'|'5m'=
  return evaluateMultiTimeframeEntry({candles:data,entryFrame,capital,snapshots:Object.fromEntries(Object.entries(data).map(([f,rows])=>[f,structureSnapshot(rows)])) as Record<Timeframe,Snapshot>,analyses:{'1m':analyze(data['1m']),'5m':analyze(data['5m']),'15m':analyze(data['15m']),'1H':analyze(data['1H'])}});
 }
 function chartOverlay(plan:TradePlan):TrendMap|undefined{return plan.ready&&plan.entry&&plan.stop&&plan.target?{entry:plan.entry,stop:plan.stop,target:plan.target,caption:(plan.direction==='LONG'?'롱':'숏')+' · 공통 참고 계획 · '+plan.entryFrame+' 정제',entryFrame:plan.entryFrame}:undefined;}
-function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
+function CommonPlanCard({plan,market,entryFrame,onEntryFrame}:{plan:TradePlan;market:Market;entryFrame:'1m'|'5m';onEntryFrame:(frame:'1m'|'5m')=>void}){
  const levels=plan.ready?{entry:plan.entry,stop:plan.stop!,target:plan.target!}:plan.candidate;
  const price=(n?:number)=>n===undefined?'미확정':formatPrice(n,market);
  return <details className="common-plan-card clear-action-plan collapsible-plan" aria-label="공통 거래 계획">
- <summary className="compact-plan-summary"><span className={plan.direction==='LONG'?'positive':plan.direction==='SHORT'?'negative':''}>{plan.direction==='LONG'?'롱':plan.direction==='SHORT'?'숏':'방향 미확정'}</span><span>{plan.ready?'진입 조건 충족 · 미체결':'진입 대기'}</span><span className="compact-entry-price">{plan.ready?'진입 가격':'진입 후보'}: {levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'미확정'}</span><span className="plan-expand-label" aria-hidden="true" /></summary>
+ <summary className="compact-plan-summary beginner-plan-summary">
+ <span className="plan-action-heading"><span className={plan.direction==='LONG'?'positive':plan.direction==='SHORT'?'negative':''}>{plan.direction==='LONG'?'롱 계획':plan.direction==='SHORT'?'숏 계획':'방향 확인 중'}</span><strong>{plan.ready?'진입 조건 충족 · 아직 미체결':'지금은 진입 대기'}</strong><span className="plan-expand-label" aria-hidden="true" /></span>
+ <span className="plan-next-action">{plan.ready?'아래 진입 구역과 손절·목표를 확인하세요. 실제 체결은 모의투자에서 확인합니다.':plan.blockers?.[0]??plan.stage}</span>
+ <span className="plan-quick-prices">
+ <span><small>{plan.ready?'진입 구역':'진입 · 조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'조건 확인 전'}</b></span>
+ <span><small>손절{!plan.ready?' · 후보':''}</small><b className="negative">{price(levels?.stop)}</b></span>
+ <span><small>익절{!plan.ready?' · 후보':''}</small><b className="positive">{price(levels?.target)}</b></span>
+ </span>
+ </summary>
  <div className="plan-expanded-content">
+ <div className="trend-plan-note"><label>진입을 확인할 봉 <select value={entryFrame} onChange={e=>onEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분봉</option><option value="5m">5분봉</option></select></label><p>차트 시간대를 바꿔도 공통 계획은 유지됩니다. 이곳은 분석 후보이며, 보유 거래의 체결가와 손절·목표는 모의투자에서 확인하세요.</p></div>
  <header><strong>{plan.ready?'진입 조건 충족 · 체결 전 확인':'지금은 진입 대기'}</strong><span>{plan.direction==='LONG'?'매수 방향':plan.direction==='SHORT'?'숏 방향':'방향 미확정'} · {plan.stage}</span></header>
  <p className="plan-context">{plan.context}</p>
  <div className="common-plan-values">
@@ -893,8 +902,9 @@ function CommonPlanCard({plan,market}:{plan:TradePlan;market:Market}){
  <div><small>③ 손절 기준 · 15분 상위 구조</small><b className="negative">{price(levels?.stop)}</b><PlanPriceHelp kind="stop" plan={plan}/></div>
  <div><small>④ 익절 목표 · 4H 스윙 극점</small><b className="positive">{price(levels?.target)}</b><PlanPriceHelp kind="target" plan={plan}/></div>
  </div>
- <p>진입은 표시 구역에 재접촉하고 아래 조건을 확인한 뒤 판단합니다. 관심 구역의 중심을 진입가로 쓰지 않습니다. 작은 봉으로 이동해도 상위 손절·목표는 같은 계획을 봅니다.</p>
- <p><b>보유·청산:</b> 진입 후 최초 손절·목표를 유지하고 4시간 구조 무효화를 확인합니다. 1분/5분 반대 신호만으로 익절하지 않으며, 목표를 임의로 늘리거나 손절을 넓히지 않습니다.</p>
+ <p><b>⑤ 진입 전 확인:</b> 진입은 표시 구역에 재접촉하고 아래 조건을 확인한 뒤 판단합니다. 관심 구역의 중심을 진입가로 쓰지 않습니다. 작은 봉으로 이동해도 상위 손절·목표는 같은 계획을 봅니다.</p>
+ <p><b>⑥ 보유·청산:</b> 진입 후 최초 손절·목표를 유지하고 4시간 구조 무효화를 확인합니다. 1분/5분 반대 신호만으로 익절하지 않으며, 목표를 임의로 늘리거나 손절을 넓히지 않습니다.</p>
+ <p><b>⑦ 계획 취소:</b> 진입 전에 상위 구조가 무효화되거나 공통 계획의 방향·가격 조건이 바뀌면 이전 후보로 진입하지 말고 새 계획을 확인하세요.</p>
  {!plan.ready&&<p><b>다음 확인:</b> {plan.blockers?.[0]??plan.stage} · 후보 가격선은 주문·체결 표시가 아닙니다.</p>}
  <details><summary>왜 대기하나요? · 구조 조건과 추가 제한 구분</summary><ul>{plan.blockers?.map((reason,i)=><li key={i}>{reason}</li>)}</ul><p>15분 손절·4시간 목표, 0.1% 완충, A/B등급, H1 동행, 순 2R와 30분 제한은 현재 구현의 검증 설정입니다. 강의의 모든 거래에 적용되는 고정 공식으로 확인된 것은 아닙니다. 시세 오류·미래 데이터·중복 체결 방지는 별도 안전 검사입니다.</p></details>
  <p>이 화면은 차트 참고 계획입니다. 보유 중인 자동 계좌의 실제 진입·손절·목표는 모의투자에 저장된 값을 따릅니다.</p>
@@ -3970,8 +3980,7 @@ function Dashboard({viewer,onLogout}:{viewer:AuthUser;onLogout:()=>void}) {
                     ))}
                   </div>
                 </div>
-                <div className="trend-plan-note"><label>공통 계획의 진입 시간대 <select value={planEntryFrame} onChange={e=>setPlanEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분 정제</option><option value="5m">5분 정제</option></select></label><p>차트 시간대는 관찰 배율입니다. 바꿔도 거래 방향은 4H 기준을 유지합니다. 먼 가격은 축을 늘리지 않고 화면 밖 안내로 표시합니다.</p></div>
-                <CommonPlanCard plan={commonPlan} market={market}/>
+                <CommonPlanCard plan={commonPlan} market={market} entryFrame={planEntryFrame} onEntryFrame={setPlanEntryFrame}/>
                 <PriceChart
                   referencePlan={commonPlan}
                   phaseTimeline={phaseTimeline}

@@ -2152,3 +2152,20 @@ button:disabled {
 .market-phase-controls p{font-size:13px;line-height:1.65;color:#9eb4c8;margin:8px 0 0;overflow-wrap:anywhere}
 .market-phase-controls button:focus-visible{outline:2px solid #71deca;outline-offset:3px}
 @media(max-width:600px){.market-phase-toolbar{gap:6px}.market-phase-toolbar>strong{width:100%}.market-phase-toolbar button{flex:1 0 auto}}
+
+/* The beginner action summary shares the existing plan; it never computes signals. */
+.collapsible-plan>summary.beginner-plan-summary{display:block;padding:0;font-size:14px}
+.plan-action-heading{display:flex;align-items:center;gap:10px;flex-wrap:wrap;line-height:1.5}
+.plan-action-heading>span:first-child{font-weight:800}
+.plan-next-action{display:block;color:#b7c8d7;font-size:14px;line-height:1.5;margin:6px 0 10px;overflow-wrap:anywhere}
+.plan-quick-prices{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px}
+.plan-quick-prices>span{min-width:0;border-left:2px solid #34515c;padding-left:10px}
+.plan-quick-prices small,.plan-quick-prices b{display:block;overflow-wrap:anywhere;line-height:1.5}
+.plan-quick-prices small{font-size:13px;color:#a7bacb;font-weight:400}
+.plan-quick-prices b{font-size:15px;font-variant-numeric:tabular-nums}
+.beginner-plan-summary .plan-expand-label:after{content:'계획 자세히 ▾'}
+.collapsible-plan[open]>.beginner-plan-summary .plan-expand-label:after{content:'접기 ▴'}
+.clear-action-plan .common-plan-values{grid-template-columns:repeat(2,minmax(0,1fr))}
+.clear-action-plan .common-plan-values small,.clear-action-plan p{font-size:14px}
+.clear-action-plan .common-plan-values b{font-size:15px}
+@media(max-width:520px){.plan-quick-prices{grid-template-columns:1fr 1fr}.plan-quick-prices>span:first-child{grid-column:1/-1}.clear-action-plan .common-plan-values{grid-template-columns:1fr}.plan-action-heading{gap:6px 10px}.plan-action-heading strong{font-size:14px}}

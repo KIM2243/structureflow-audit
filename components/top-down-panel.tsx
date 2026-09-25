@@ -7,8 +7,8 @@ export function TopDownPanel({ result, selected, onDrillDown, onExplain }: {
   onExplain: (step: MultiTimeframeEntryStep) => void;
 }) {
   return <article className={`plan multi-timeframe-entry ${result.status.toLowerCase()}`}>
-    <header><span>Top-Down · 공통 계획 확인</span><b>{result.tradePlan.ready ? '참고 조건 충족' : '대기'}</b></header>
-    <h3>{result.tradePlan.stage}</h3>
+    <header><span>시간대별 판단 근거</span><b>{result.tradePlan.ready ? '참고 조건 충족' : '대기'}</b></header>
+    <h3>왜 이 계획인가요?</h3>
     <p>1D는 배경, 4H는 거래 방향입니다. 15분 구조로 손절을 정하고 {result.entryTimeframe === '5m' ? '5분' : '1분'}봉으로 진입을 정밀화합니다.</p>
     <ol className="entry-gate-steps unified-topdown">
       {result.steps.map(step => <li key={step.timeframe} className={step.state.toLowerCase()}>
