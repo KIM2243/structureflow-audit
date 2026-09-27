@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import {readCandidateHistory} from '../lib/candidate-history.mjs';
 import {readFile} from 'node:fs/promises';
 import {UNIVERSE,LIMITS} from '../lib/scan-policy.mjs';
 import { createRequestCache } from '../lib/bridge-request-cache.mjs';
@@ -144,8 +145,11 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/api/candidates') {
       const market=url.searchParams.get('market')==='KR'?'KR':'US';
-      try {const data=JSON.parse(await readFile(`/var/lib/structureflow-scan/latest-${market}.json`,'utf8'));json(response,200,{...data,universe:UNIVERSE[market],limits:LIMITS});}
-      catch(error){if(error.code!=='ENOENT')throw error;json(response,200,{market,status:'pending',candidates:[],universe:UNIVERSE[market],limits:LIMITS});}
+      if(url.searchParams.get('history')==='1'){json(response,200,await readCandidateHistory('/var/lib/structureflow-scan',market,LIMITS.reports));return;}
+      const date=url.searchParams.get('date');
+      if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date)){json(response,400,{error:'날짜 형식이 올바르지 않습니다.'});return;}
+      try {const data=JSON.parse(await readFile(date?`/var/lib/structureflow-scan/report-${market}-${date}.json`:`/var/lib/structureflow-scan/latest-${market}.json`,'utf8'));json(response,200,{...data,universe:UNIVERSE[market],limits:LIMITS});}
+      catch(error){if(error.code!=='ENOENT')throw error;if(date){json(response,404,{error:'보관 기간이 지났거나 저장되지 않은 리포트입니다.'});return;}json(response,200,{market,status:'pending',candidates:[],universe:UNIVERSE[market],limits:LIMITS});}
       return;
     }
     if (url.pathname === '/api/quotes') {
