@@ -1,5 +1,7 @@
 # StructureFlow Audit Map
 
+> Branch update: Falcon v1 is parallel/test-only. Production remains the audit-baseline legacy path. New rules below refer to the new engine only; see docs/FALCON-STRUCTURE-V1.md.
+
 ## Audit Baseline
 
 - Tag: `audit-baseline`
@@ -21,7 +23,7 @@
 | Internal Structure | 구현됨 | lib/market-structure.ts; lib/engine.ts | mechanicalInternalPivots; detectStructureEvents(scope=INTERNAL) | Candle[] → 내부 Pivot[] | HH/LH/HL/LL 및 내부 이벤트 | engine.ts analyze; upper-context.ts frameContext; market-phases.ts marketPhaseTimeline | PriceChart 내부 구조/용어 설명 |
 | BOS | 구현됨 | lib/market-structure.ts; lib/engine.ts | mapMarketStructure; detectStructureEvents | OHLC/pivot/구조 상태 | StructureEvent(kind=BOS, direction, scope, index, price) | snapshot/analyze 및 상위 맥락 계산 | PriceChart, 시간대 구조 |
 | CHoCH | 구현됨 | 위와 동일; lib/upper-context.ts | mapMarketStructure; detectStructureEvents; confirmUpperContext | 보호 수준 이탈/내부 pivot, H4/H1 상태 | CHOCH 이벤트, 상위 confirmed/reason | upperContext → evaluateMultiTimeframeEntry/advanceAuto | PriceChart; components/upper-context-details.tsx; 공통 계획 |
-| Type 1 / Type 2 | 관련 로직 확인되지 않음 | 전용 파일 없음 | 전용 분류 symbol 없음 | — | — | — | 명시적인 판정 결과 연결 없음 |
+| Type 1 / Type 2 | 구현됨(병렬 검증용, 운영 미전환) | lib/falcon-structure.ts; lib/falcon-internal.ts | type1Break; mapFalconSwingStructure; type2Break; mapFalconInternalStructure | 관측 시각/완료 여부를 포함한 봉, 선택적 known seed | Swing close / confirmed Minor wick events | falcon-shadow.ts 및 tests | 운영 UI 연결 없음 |
 | Minor High / Low | 부분 구현 | lib/market-structure.ts | mechanicalInternalPivots | 순차 Candle[] | 기계적 내부 Pivot[] | detectStructureEvents | 내부 구조 표시. 강의 Minor 전용 분류와 동일함은 검증되지 않음 |
 | Premium / Discount | 구현됨 | lib/market-structure.ts; lib/swing-range.ts; lib/engine.ts | mapMarketStructure.range; getRecentSwingRange; analyze | 확인된 high/low 또는 반대 pivot 쌍 | high/low/equilibrium 및 분석 구간 | analyze → analysis.confirmedRange; getRecentSwingRange는 테스트 외 실행 호출 확인되지 않음 | PriceChart dealingRange → P/D SVG; helper는 직접 UI 연결 없음 |
 | Supply / Demand | 부분 구현 | lib/engine.ts; lib/auto-paper.ts | detectZones(private); qualifiedZone; shiftedZone; gradeZone | Candle[]/방향/프레임/구역 | OB/FVG StructureZone[] 또는 실행용 Zone/등급/target | analyze; evaluateMultiTimeframeEntry; advanceAuto | PriceChart 구역, 등급, 공통 계획. 강의의 모든 구역 유형을 인증하지 않음 |
@@ -61,3 +63,11 @@
 ### 재검사에서 바로잡은 연결
 
 `getRecentSwingRange`는 함수/테스트가 존재하지만 현재 실행 UI 호출은 확인되지 않았다. 실제 P/D는 `PriceChart`의 dealingRange가 `analysis.confirmedRange` 또는 과거 viewport의 `mapMarketStructure(...).range`를 사용한다. `structureSnapshot`은 swing 요약이며 internal 계산은 `analyze` 등 별도 호출 경로다. `engine.analyze` 내 snapshots는 고정 개수 resample을 사용하므로 공급자 native timeframes와 혼동하지 않아야 한다.
+
+## Falcon v1 병렬 경로
+
+- Minor Candidate / Confirmed: `lib/falcon-internal.ts`의 `InternalCandidate`, `mapFalconInternalStructure`. candidate.detectedAt와 point.confirmedAt를 분리하고 같은 봉 신규 확정 Minor의 CHOCH 사용을 금지한다. 검증된 Minor만 `type2Break`에 전달한다.
+- 초기 방향: 둘 다 TRANSITION; 초기 확정은 initialDirection 메타데이터이며 CHOCH 아님. bootstrap/candidate 경계는 StructureFlow implementation choice로 별도 문서화했다.
+- `lib/falcon-shadow.ts`: `historicalFalconObservations` → `compareFalconStructure` / `falconDifferential` / `falconMtfShadow`. H4 Swing과 H1/15m/1m/5m Internal을 병렬 비교. trade readiness나 계좌 주문 권한을 부여하지 않는다.
+- `scripts/falcon-compare.mjs`: synthetic 비교 report. production imports, API, DB, chart UI와 연결하지 않았다.
+- 기존 표의 legacy 경로/부족 항목은 운영에서 여전히 유효하다. 신규 코드가 추가됐다고 legacy first-opposite TRANSITION, close-based internal, Swing-bias timing 경로가 운영에서 교체된 것은 아니다. 사용자의 후속 지시에 따라 외부 재감사 전 전환을 보류했다.

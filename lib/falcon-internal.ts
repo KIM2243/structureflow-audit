@@ -1,5 +1,5 @@
 import type {FalconDirection,FalconEvent,FalconObservation,FalconPoint} from './falcon-structure';
-import {validateObservations} from './falcon-structure.ts';
+import {validateObservations,validFalconPoint} from './falcon-structure.ts';
 export type InternalCandidate={pivotIndex:number;price:number;kind:'high'|'low';detectedAt:number;observedAt:number};
 export type FalconInternalSeed={direction:FalconDirection;extreme:FalconPoint;minor?:FalconPoint;knownAt:number};
 export type FalconInternalResult={trend:FalconDirection|'TRANSITION';activeLeg?:FalconDirection;currentExtreme?:{pivotIndex:number;price:number};pullbackDetected:boolean;candidate?:InternalCandidate;confirmedMinorHigh?:FalconPoint;confirmedMinorLow?:FalconPoint;points:FalconPoint[];events:FalconEvent[];initialDirection?:{index:number;observedAt:number};ambiguities:{eventIndex:number;reason:'SAME_BAR_AMBIGUOUS'}[]};
@@ -7,7 +7,7 @@ export function type2Break(direction:FalconDirection, point:FalconPoint, observa
  return point.confirmedAt<observation.index&&point.observedAt<=observation.observedAt&&(direction==='BULLISH'?observation.candle.high>point.price:observation.candle.low<point.price);
 }
 export function mapFalconInternalStructure(rows:readonly FalconObservation[],seed?:FalconInternalSeed):FalconInternalResult{
- if(seed){const p=seed.minor,e=seed.extreme;if(e.confirmedAt>seed.knownAt||e.confirmedAt<e.pivotIndex||e.kind!==(seed.direction==='BULLISH'?'high':'low')||!Number.isFinite(e.price)||e.price<=0||p&&(p.confirmedAt>seed.knownAt||p.confirmedAt<p.pivotIndex||p.kind===e.kind||!Number.isFinite(p.price)||p.price<=0))throw new Error('Known internal seed required');}
+ if(seed){const p=seed.minor,e=seed.extreme;if(!validFalconPoint(e,seed.knownAt)||p&&!validFalconPoint(p,seed.knownAt)||e.confirmedAt>seed.knownAt||e.confirmedAt<e.pivotIndex||e.kind!==(seed.direction==='BULLISH'?'high':'low')||!Number.isFinite(e.price)||e.price<=0||p&&(p.confirmedAt>seed.knownAt||p.confirmedAt<p.pivotIndex||p.kind===e.kind||!Number.isFinite(p.price)||p.price<=0))throw new Error('Known internal seed required');}
  validateObservations(rows,seed?.knownAt??-1,seed?Math.max(seed.extreme.observedAt,seed.minor?.observedAt??-Infinity):-Infinity);
  let trend:FalconInternalResult['trend']=seed?.direction??'TRANSITION',leg=seed?.direction,extreme=seed?{pivotIndex:seed.extreme.pivotIndex,price:seed.extreme.price}:undefined;
  let candidate:InternalCandidate|undefined,high=seed?.minor?.kind==='high'?{...seed.minor}:undefined,low=seed?.minor?.kind==='low'?{...seed.minor}:undefined,initialDirection:FalconInternalResult['initialDirection'];

@@ -95,3 +95,9 @@ Node >=22.13.0에서 `npm ci`, `npm test`, `npx tsc --noEmit`, `npm run build`�
 ## Audit Baseline 준비
 
 기능별 구현 상태와 실제 호출 흐름은 [AUDIT_MAP.md](AUDIT_MAP.md), 새 설치·lint를 포함한 검증 결과는 [AUDIT_VALIDATION.md](AUDIT_VALIDATION.md)를 참조한다. lint는 기존 소스의 22개 error 진단으로 실패했으며 이를 수정하지 않았다. `audit-baseline`은 감사 문서까지 포함한 최초 기준점으로 고정하고 이후 변경과 비교한다. 공급/수요, 유동성, Equal High/Low, Sweep, Minor 판정은 부분 구현으로 분류하며 Type1/2·Trendline/Range Liquidity·Inducement는 전용 계산 경로가 확인되지 않았다.
+
+## Parallel Falcon v1 (review branch only)
+
+`lib/falcon-structure.ts`, `lib/falcon-internal.ts` implement a separate Type 1 Swing / Type 2 confirmed-Minor engine. [Rules, implementation choices and remaining risks](docs/FALCON-STRUCTURE-V1.md). No production gate, UI, API, DB or broker integration is changed. Historical and MTF comparison runs in a test/development harness; the live website still uses legacy behavior pending external review.
+
+Run `node --experimental-strip-types scripts/falcon-compare.mjs` for the synthetic differential report. This is not a profitability backtest.

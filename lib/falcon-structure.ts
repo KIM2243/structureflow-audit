@@ -8,14 +8,14 @@ export type FalconSwingSeed = { direction:FalconDirection; strong:FalconPoint; w
 export type FalconSwingResult = { trend:FalconDirection|'TRANSITION'; protectedLevel?:FalconPoint; weakLevel?:FalconPoint; initialDirection?:{index:number;observedAt:number}; events:FalconEvent[]; points:FalconPoint[] };
 
 // Explicit, already-known anchors avoid inventing a lecture bootstrap rule.
-function validPoint(p:FalconPoint, knownAt:number) {
+export function validFalconPoint(p:FalconPoint, knownAt:number) {
  return Number.isInteger(p.pivotIndex)&&p.pivotIndex>=0&&Number.isInteger(p.confirmedAt)&&p.confirmedAt>=p.pivotIndex&&p.confirmedAt<=knownAt&&Number.isFinite(p.price)&&p.price>0&&Number.isFinite(p.observedAt);
 }
 export function validateObservations(rows:readonly FalconObservation[], knownAt:number, observedAt:number) {
- let index=knownAt, time=observedAt;
+ let index=knownAt, time=observedAt, date=-Infinity;
  for(const r of rows){const b=r.candle;
-  if(!Number.isInteger(r.index)||r.index<=index||!Number.isFinite(r.observedAt)||r.observedAt<time||!Number.isFinite(Date.parse(b.date))||r.observedAt<Date.parse(b.date)||![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite)||b.low<=0||b.high<Math.max(b.open,b.close,b.low)||b.low>Math.min(b.open,b.close)||b.volume<0)throw new Error('Invalid or out-of-order Falcon observation');
-  index=r.index;time=r.observedAt;
+  if(typeof r.complete!=='boolean'||Date.parse(b.date)<=date||!Number.isInteger(r.index)||r.index<=index||!Number.isFinite(r.observedAt)||r.observedAt<time||!Number.isFinite(Date.parse(b.date))||r.observedAt<Date.parse(b.date)||![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite)||b.low<=0||b.high<Math.max(b.open,b.close,b.low)||b.low>Math.min(b.open,b.close)||b.volume<0)throw new Error('Invalid or out-of-order Falcon observation');
+  index=r.index;time=r.observedAt;date=Date.parse(b.date);
  }
 }
 export function type1Break(direction:FalconDirection, level:number, observation:FalconObservation) {
@@ -23,7 +23,7 @@ export function type1Break(direction:FalconDirection, level:number, observation:
 }
 export function mapFalconSwingStructure(rows:readonly FalconObservation[], seed?:FalconSwingSeed):FalconSwingResult {
  if(!seed)return initializeFalconSwing(rows);
- if(!validPoint(seed.strong,seed.knownAt)||!validPoint(seed.weak,seed.knownAt)||seed.strong.pivotIndex===seed.weak.pivotIndex||seed.strong.kind!==(seed.direction==='BULLISH'?'low':'high')||seed.weak.kind===seed.strong.kind||(seed.direction==='BULLISH'?seed.strong.price>=seed.weak.price:seed.strong.price<=seed.weak.price))throw new Error('Independent confirmed swing seed required');
+ if(!validFalconPoint(seed.strong,seed.knownAt)||!validFalconPoint(seed.weak,seed.knownAt)||seed.strong.pivotIndex===seed.weak.pivotIndex||seed.strong.kind!==(seed.direction==='BULLISH'?'low':'high')||seed.weak.kind===seed.strong.kind||(seed.direction==='BULLISH'?seed.strong.price>=seed.weak.price:seed.strong.price<=seed.weak.price))throw new Error('Independent confirmed swing seed required');
  validateObservations(rows,seed.knownAt,Math.max(seed.strong.observedAt,seed.weak.observedAt));
  let trend=seed.direction,strong={...seed.strong},weak={...seed.weak};
  let candidate:FalconPoint|undefined, weakConfirmed=true;

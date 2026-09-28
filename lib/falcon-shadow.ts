@@ -18,7 +18,7 @@ export function historicalFalconObservations(bars:Candle[],minutes:number,now:nu
 export function compareFalconStructure(rows:readonly FalconObservation[]){
  const candles=rows.map(r=>r.candle),legacySwing=mapMarketStructure(candles),legacyEvents=detectStructureEvents(candles,mechanicalInternalPivots(candles),'INTERNAL',1);
  const swing=mapFalconSwingStructure(rows),internal=mapFalconInternalStructure(rows);
- return {legacySwingDirection:legacySwing.trend,legacyInternalDirection:legacyEvents.at(-1)?.direction??'TRANSITION',falconSwingDirection:swing.trend,falconInternalDirection:internal.trend,legacyEvent:legacyEvents.at(-1),falconEvent:internal.events.at(-1),protectedLevel:swing.protectedLevel,weakLevel:swing.weakLevel,confirmedMinorHigh:internal.confirmedMinorHigh,confirmedMinorLow:internal.confirmedMinorLow,swing,internal};
+ return {legacySwingDirection:legacySwing.trend,legacyInternalDirection:legacyEvents.at(-1)?.direction??'TRANSITION',falconSwingDirection:swing.trend,falconInternalDirection:internal.trend,legacyEvent:legacyEvents.at(-1),legacySwingEvent:legacySwing.events.at(-1),falconEvent:internal.events.at(-1),falconSwingEvent:swing.events.at(-1),protectedLevel:swing.protectedLevel,weakLevel:swing.weakLevel,confirmedMinorHigh:internal.confirmedMinorHigh,confirmedMinorLow:internal.confirmedMinorLow,swing,internal};
 }
 export function falconDifferential(rows:readonly FalconObservation[]){
  return rows.map((row,n)=>{const result=compareFalconStructure(rows.slice(0,n+1));return {barIndex:row.index,date:row.candle.date,observedAt:row.observedAt,...result,difference:result.legacySwingDirection!==result.falconSwingDirection||result.legacyInternalDirection!==result.falconInternalDirection};});
