@@ -82,3 +82,7 @@ The parallel engines must satisfy strict close/wick distinction, confirmed-only 
 8. Production availability: no runtime path changed and build/regressions pass; deployed service was not modified or newly live-tested in this task.
 
 This completes the parallel implementation/testing stage, NOT production migration or full lecture conformance certification.
+
+## Internal event metadata clarification
+
+Internal currentExtreme retains its own FalconPoint metadata. Explicit seeds preserve their supplied confirmation/observation times, even when confirmation follows the price bar. Newly observed leg extremes become known when that observation establishes or extends the leg (confirmedAt = observation.index, observedAt = observation.observedAt); this denotes knowledge of the active extreme, not Minor confirmation or a confirmed trend. BOS copies pivotIndex and confirmedAt from the broken extreme before replacing it. CHOCH copies them from its confirmed Minor target. Candidate detectedAt remains the first discovery of the pullback, independent of candidate revisions and target knowledge. Minor confirmation still occurs only on the existing extension condition. Event observedAt is the break observation time, with target observedAt <= event observedAt and pivotIndex <= confirmedAt <= eventIndex. No structural predicates or production paths change.
