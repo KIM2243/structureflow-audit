@@ -1,6 +1,6 @@
 import { detectStructureEvents, type Candle, type StructureEvent } from './engine.ts';
 import { mapMarketStructure, mechanicalInternalPivots } from './market-structure.ts';
-import { closedBars, validBars } from './auto-paper.ts';
+import { closedBars, validBars } from './confirmed-bars.ts';
 
 export type Phase = 'CC' | 'CP' | 'PC' | 'PP';
 export type PhaseSide = 'LONG' | 'SHORT';

@@ -1,3 +1,4 @@
+import {upperContext} from './upper-context.ts';
 import {composeTradePlan,type TradePlan} from './trade-plan.ts';
 import type { Analysis, Snapshot, Candle } from './engine';
 import { closedBars, qualifiedZone, shiftedZone, internalDirection, entryTerms, gradeZone, validBars, upperStructurePlan } from './auto-paper.ts';
@@ -48,7 +49,8 @@ export function evaluateMultiTimeframeEntry({
   const dailyDirection = trendDirection(snapshots['1D'].trend);
   const middleDirection = trendDirection(snapshots['4H'].trend);
   const direction = middleDirection;
-  const internal = internalDirection(closedBars(candles?.['1H']||[],60,now));
+  const upper=upperContext(candles??{},now,direction);
+  const internal = upper.h1.internal==='BULLISH'?1:upper.h1.internal==='BEARISH'?-1:0;
   const confirmationDirection:EntryDirection = internal===1?'LONG':internal===-1?'SHORT':'NEUTRAL';
   const timingDirection = analyses['15m'].bias;
   const triggerDirection = analyses[entryFrame]?.bias||'NEUTRAL';
@@ -107,19 +109,14 @@ export function evaluateMultiTimeframeEntry({
     },
     {
       timeframe: '1H',
-      label: '구조 확인',
+      label: '상위 내부 CHoCH 확인',
       state:
-        direction === 'NEUTRAL' || confirmationDirection === 'NEUTRAL'
+        direction === 'NEUTRAL' || !upper.confirmed
           ? 'WAIT'
           : confirmationDirection === direction
             ? 'PASS'
             : 'WAIT',
-      detail:
-        confirmationDirection === direction
-          ? `1시간 분석이 ${directionText(direction)} 진입을 확인했습니다.`
-          : confirmationDirection === 'NEUTRAL'
-            ? '1시간 방향성 확인이 필요합니다.'
-            : '1시간은 보조 구조가 아직 4시간 스윙 방향과 다릅니다.',
+      detail: upper.reason,
     },
     {
       timeframe: '15m',
@@ -168,9 +165,12 @@ export function evaluateMultiTimeframeEntry({
       : 'WAIT';
 
   const tradePlan=composeTradePlan({direction,entryFrame,ready:status==='READY',stage:!nativeReady||!fresh?'데이터 확인 대기':!context?'4H 방향·구역 확정 대기':!h4Touch?'4H 관심 구역 접촉 대기':!m15?'15분 전환 대기':!m15Touch?'15분 재접촉 대기':!m1?'하위 전환·정제 대기':status!=='READY'?'재접촉·방향·등급·비용 확인 대기':'참고 진입 조건 충족',interest:context?.zone,refined:m1,risk:riskPlan,netR,asOf:now});
+  tradePlan.upper=upper;
+  if(!upper.confirmed&&nativeReady&&fresh)tradePlan.stage=upper.reason;
   const opposite=triggerDirection!=='NEUTRAL'&&direction!=='NEUTRAL'&&triggerDirection!==direction;
   tradePlan.context=direction==='NEUTRAL'?'상위 스윙 방향 미확정 → 신규 진입 대기':`4시간 ${directionText(direction)} 계획 · ${opposite?'하위 봉은 반대 방향의 반등·조정 중':triggerDirection==='NEUTRAL'?'하위 방향 확인 중':'하위 흐름도 같은 방향'} → ${tradePlan.ready?'참고 진입 조건 충족':'진입 대기'}`;
   tradePlan.blockers=[
+    ...(!upper.confirmed?[upper.reason]:[]),
     ...(!nativeReady?['데이터: 필요한 원본 봉 부족·오류']:[]),
     ...(!fresh?['데이터: 현재 1분봉 지연·시각 확인 필요']:[]),
     ...(!context?['구조: 4시간 방향·수요/공급 구역 미확정']:[]),

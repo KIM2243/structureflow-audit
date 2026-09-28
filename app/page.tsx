@@ -6,6 +6,7 @@ import { higherContexts, type HigherContext } from '@/lib/higher-context';
 import type {TradePlan} from '@/lib/trade-plan';
 import { ChartIndicatorGuide } from '@/components/chart-indicator-guide';
 import { StructureTermHelp } from '@/components/structure-term-help';
+import { UpperContextDetails } from '@/components/upper-context-details';
 import { MarketPhaseControls, MarketPhaseOverlay, MarketPhaseHelp, type PhaseSelection } from '@/components/market-phase-layer';
 import { marketPhaseTimeline, phaseAt, type Phase, type PhaseSide, type PhaseTimeline } from '@/lib/market-phases';
 
@@ -886,6 +887,7 @@ function CommonPlanCard({plan,market,entryFrame,onEntryFrame}:{plan:TradePlan;ma
  <summary className="compact-plan-summary beginner-plan-summary">
  <span className="plan-action-heading"><span className={plan.direction==='LONG'?'positive':plan.direction==='SHORT'?'negative':''}>{plan.direction==='LONG'?'롱 계획':plan.direction==='SHORT'?'숏 계획':'방향 확인 중'}</span><strong>{plan.ready?'진입 조건 충족 · 아직 미체결':'지금은 진입 대기'}</strong><span className="plan-expand-label" aria-hidden="true" /></span>
  <span className="plan-next-action">{plan.ready?'아래 진입 구역과 손절·목표를 확인하세요. 실제 체결은 모의투자에서 확인합니다.':plan.blockers?.[0]??plan.stage}</span>
+ {plan.upper&&<span className="plan-upper-summary">4H 스윙 {plan.upper.h4.swing==='BULLISH'?'상승':plan.upper.h4.swing==='BEARISH'?'하락':'미확정'} · 1H 스윙 {plan.upper.h1.swing==='BULLISH'?'상승':plan.upper.h1.swing==='BEARISH'?'하락':'미확정'} · {plan.direction==='LONG'?'롱':plan.direction==='SHORT'?'숏':'방향 미확정'} 기준 {plan.upper.phase??'단계 미확정'} · 내부 CHoCH {plan.upper.confirmed?'방향 확인':'확인 대기'}</span>}
  <span className="plan-quick-prices">
  <span><small>{plan.ready?'진입 구역':'진입 · 조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'조건 확인 전'}</b></span>
  <span><small>손절{!plan.ready?' · 후보':''}</small><b className="negative">{price(levels?.stop)}</b></span>
@@ -896,6 +898,7 @@ function CommonPlanCard({plan,market,entryFrame,onEntryFrame}:{plan:TradePlan;ma
  <div className="trend-plan-note"><label>진입을 확인할 봉 <select value={entryFrame} onChange={e=>onEntryFrame(e.target.value as '1m'|'5m')}><option value="1m">1분봉</option><option value="5m">5분봉</option></select></label><p>차트 시간대를 바꿔도 공통 계획은 유지됩니다. 이곳은 분석 후보이며, 보유 거래의 체결가와 손절·목표는 모의투자에서 확인하세요.</p></div>
  <header><strong>{plan.ready?'진입 조건 충족 · 체결 전 확인':'지금은 진입 대기'}</strong><span>{plan.direction==='LONG'?'매수 방향':plan.direction==='SHORT'?'숏 방향':'방향 미확정'} · {plan.stage}</span></header>
  <p className="plan-context">{plan.context}</p>
+ {plan.upper&&<UpperContextDetails upper={plan.upper}/>}
  <div className="common-plan-values">
  <div><small>① 기다릴 위치 · 4H 관심 구역</small><b>{plan.interest?plan.interest.map(n=>price(n)).join(' – '):'상위 구역 미확정'}</b><PlanPriceHelp kind="interest" plan={plan}/></div>
  <div><small>② {plan.entryFrame} 진입 구역 · {plan.ready?'조건 충족':'조건부 후보'}</small><b>{levels?.entry?levels.entry.map(n=>price(n)).join(' – '):'하위 정제 전 · 진입가 없음'}</b><PlanPriceHelp kind="entry" plan={plan}/></div>

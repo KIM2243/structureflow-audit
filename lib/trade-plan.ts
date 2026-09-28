@@ -1,5 +1,6 @@
+import type {UpperContext} from './upper-context';
 import type {Zone} from './auto-paper';
-export type TradePlan={direction:'LONG'|'SHORT'|'NEUTRAL';entryFrame:'1m'|'5m';stage:string;ready:boolean;interest?:[number,number];entry?:[number,number];stop?:number;target?:number;netR:number;asOf:number;candidate?:{entry?:[number,number];stop:number;target:number};blockers?:string[];context?:string};
+export type TradePlan={upper?:UpperContext;direction:'LONG'|'SHORT'|'NEUTRAL';entryFrame:'1m'|'5m';stage:string;ready:boolean;interest?:[number,number];entry?:[number,number];stop?:number;target?:number;netR:number;asOf:number;candidate?:{entry?:[number,number];stop:number;target:number};blockers?:string[];context?:string};
 // A reference plan never promotes an interest-zone midpoint to an entry price.
 export function composeTradePlan(input:{direction:TradePlan['direction'];entryFrame:TradePlan['entryFrame'];stage:string;ready:boolean;interest?:Zone;refined?:Zone;risk?:{stop:number;target:number};netR:number;asOf:number}):TradePlan{
  const {direction,entryFrame,stage,netR,asOf}=input;

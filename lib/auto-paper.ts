@@ -1,15 +1,20 @@
+import {upperContext,type UpperContext} from './upper-context.ts';
+import {closedBars,validBars} from './confirmed-bars.ts';
+export {closedBars,validBars} from './confirmed-bars.ts';
 import { mapMarketStructure, mechanicalInternalPivots } from './market-structure.ts';
 import type { Candle } from './engine';
 
 // Paper-only continuation experiment. Grade weights and partial exits are policy, not lecture formulas.
 export const LEGACY_V2 = 'PP-H4-M15-M1-long-short-partial-v2';
-export const AUTO_VERSION = 'PP-H4-target-M15-risk-refined-entry-v3';
+export const LEGACY_V3 = 'PP-H4-target-M15-risk-refined-entry-v3';
+export const AUTO_VERSION = 'H4-H1-internal-choch-refined-entry-v4';
 export type Direction = 'LONG' | 'SHORT';
 export type ZoneGrade = { grade: 'A'|'B'|'C'; score: number; maximum: number; reasons: string[]; retests: number };
 export type Zone = { low: number; high: number; at: number; id: string; quality?: ZoneGrade };
 export type AutoConfig = { market: 'US'|'KR'; symbol: string; exchange: 'ND'|'NY'|'NA'; capital: number; riskPct: number; feeBps: number; slippageBps: number; entryTimeframe?: '1m'|'5m' };
 export type AutoFill = { id: string; side: 'BUY'|'SELL'; direction?: Direction; action?: 'ENTRY'|'PARTIAL'|'EXIT'; model?: string; at: number; price: number; quantity: number; fee: number; reason: string; pnl: number; r: number; setupId: string; source: string; observedAt: number };
 export type AutoDecision = {
+  upper?:UpperContext;
   health?: AutoHealth;
   replayKey?: string; replayError?: string;
   at: number; model: string; stage: string; reason: string; symbol: string;
@@ -62,14 +67,6 @@ export function newAutoState(config: AutoConfig, now: number): AutoState {
 function status(s: AutoState, at: number, stage: string, reason: string) {
   if (s.stage !== stage || s.reason !== reason) s.audit.unshift({ at, stage, reason });
   s.audit = s.audit.slice(0, 100); s.stage = stage; s.reason = reason;
-}
-export function validBars(bars: Candle[]): boolean {
-  return bars.every((b, i) => Number.isFinite(Date.parse(b.date)) && [b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) && b.low > 0 && b.high >= Math.max(b.open,b.close,b.low) && b.low <= Math.min(b.open,b.close) && b.volume >= 0 && (!i || Date.parse(bars[i-1].date) < Date.parse(b.date)));
-}
-// Only bars followed by another bar and whose nominal duration elapsed are used.
-// This deliberately defers shortened final-session H4 bars until the next session.
-export function closedBars(bars: Candle[], minutes: number, at: number): Candle[] {
-  return bars.filter((b,i) => i < bars.length - 1 && Date.parse(b.date) + minutes * 60_000 <= at);
 }
 export function internalDirection(bars: Candle[]) {
   const pivots = mechanicalInternalPivots(bars);
@@ -174,12 +171,12 @@ export function recordAutoDecision(previous: AutoState, s: AutoState, config: Au
   }):[];
   let checks:AutoDecision['checks'];
   if(feed && s.stage!=='DATA_WAIT' && s.setup?.m1) {
-    const z=s.setup.m1, direction=s.setup.direction||'LONG', stop=s.version===AUTO_VERSION?(s.setup.plan?.stop??0):(direction==='LONG'?z.low*.999:z.high*1.001);
+    const z=s.setup.m1, direction=s.setup.direction||'LONG', stop=(s.version===AUTO_VERSION||s.version===LEGACY_V3)?(s.setup.plan?.stop??0):(direction==='LONG'?z.low*.999:z.high*1.001);
     const terms=entryTerms(feed.price,stop,s.setup.target,previous.cash,config,direction);
     const partial=s.version===LEGACY_V2?Math.floor(terms.quantity/2):0;
     checks={insideM1:feed.price>=z.low&&feed.price<=z.high,afterM1:now>z.at,quantity:terms.quantity,stop,target:s.setup.target,netTargetR:terms.rr,weightedR:terms.quantity?(partial+(terms.quantity-partial)*terms.rr)/terms.quantity:0,h1Direction:internalDirection(closedBars(feed.timeframes['1H'],60,now))};
   }
-  const decision:AutoDecision={at:now,health:structuredClone(s.health),model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
+  const decision:AutoDecision={at:now,upper:feed&&s.version===AUTO_VERSION&&s.setup?upperContext(feed.timeframes,now,s.setup.direction||'LONG'):undefined,health:structuredClone(s.health),model:s.version,stage:s.stage,reason:s.reason,symbol:config.symbol,config:structuredClone(config),source:feed?.source||'',observedAt:feed&&Number.isFinite(feed.observedAt)?feed.observedAt:null,price:feed&&Number.isFinite(feed.price)?feed.price:null,bars,checks,setup:structuredClone(s.setup),position:structuredClone(s.position),fills:structuredClone(fills)};
   s.decisions=[decision,...(previous.decisions||[])].slice(0,200);
   return s;
 }
@@ -188,7 +185,7 @@ export function advanceAuto(previous: AutoState, config: AutoConfig, feed: AutoF
 }
 function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed, now: number, enabled=true, closeRequested=false): AutoState {
   const s=structuredClone(previous); s.lastChecked=now;
-  const v3=s.version===AUTO_VERSION, v2=s.version===LEGACY_V2||v3;
+  const v3=s.version===AUTO_VERSION||s.version===LEGACY_V3, v2=s.version===LEGACY_V2||v3;
   const one=feed.timeframes['1m'] || [];
   s.health=inspectAutoFeed(feed,config,now,s.lastQuoteAt);
   const blocked=s.health.issues.filter(i=>i.level==='block');
@@ -264,7 +261,8 @@ function advanceAutoCore(previous: AutoState, config: AutoConfig, feed: AutoFeed
     status(s,now,setup.m1?'WAIT_ENTRY':'WAIT_M1_SHIFT',setup.m1?`${entryMinutes}분 전환 확인 · 정제 구역 재접촉 대기`:`상위 손절·목표 계획 이후 ${entryMinutes}분 전환 대기`); return markEquity(s);
   }
   if(now-setup.m1.at>30*60000) {setup.used=true;status(s,now,'EXPIRED','하위 진입 대기 30분 만료');return markEquity(s);}
-  if(internalDirection(h1)!==(long?1:-1)) {status(s,now,'WAIT_PP','1시간 내부 구조의 진입 방향 동행(PP) 대기');return markEquity(s);}
+  if(s.version===AUTO_VERSION){const upper=upperContext(feed.timeframes,now,direction);if(!upper.confirmed){status(s,now,'WAIT_UPPER_CHOCH',upper.reason);return markEquity(s);}}
+  if(s.version!==AUTO_VERSION&&internalDirection(h1)!==(long?1:-1)) {status(s,now,'WAIT_PP','1시간 내부 구조의 진입 방향 동행(PP) 대기');return markEquity(s);}
   if(v2) {
     setup.zone.quality=gradeZone(h4,setup.zone,direction,240);
     setup.m15.quality=gradeZone(closedBars(feed.timeframes['15m'],15,now),setup.m15,direction,15,true);
