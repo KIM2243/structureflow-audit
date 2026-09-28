@@ -61,3 +61,12 @@
 ### 재검사에서 바로잡은 연결
 
 `getRecentSwingRange`는 함수/테스트가 존재하지만 현재 실행 UI 호출은 확인되지 않았다. 실제 P/D는 `PriceChart`의 dealingRange가 `analysis.confirmedRange` 또는 과거 viewport의 `mapMarketStructure(...).range`를 사용한다. `structureSnapshot`은 swing 요약이며 internal 계산은 `analyze` 등 별도 호출 경로다. `engine.analyze` 내 snapshots는 고정 개수 resample을 사용하므로 공급자 native timeframes와 혼동하지 않아야 한다.
+
+## 고정된 Audit Baseline SHA
+
+- Tag: `audit-baseline`
+- Commit: `88214a4a097c95cbfd66dbf5deeeb7ada1f017e5`
+- Branch: `main`
+- Created for: External code audit
+
+위 SHA는 실제 `git rev-parse audit-baseline` 결과이다. 태그 생성 후 main 문서에만 기록했으며 기준점의 계산 코드와 문서를 다시 쓰지 않았다.
