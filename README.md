@@ -41,7 +41,7 @@ StructureFlow는 OHLCV 기반 시장 구조 차트, 다중 시간대 거래 계�
 | BOS / CHoCH | `mapMarketStructure`; `lib/engine.ts`: `detectStructureEvents` | 가격과 pivot/구조 범위 → 방향·scope·시각을 가진 StructureEvent[]. Swing와 Internal 경로가 다르므로 둘 다 검사 |
 | Type 1 / Type 2 | 전용 분류 함수/타입을 찾지 못함 | 강의 분류와 위 구조 알고리즘의 동등성은 미검증. 구현됐다고 간주하지 말 것 |
 | Minor High / Low | `mechanicalInternalPivots` 관련 | 기계적 내부 pivot이 있으나 강의 Minor 정의와 독립적으로 일치 검증되지 않음 |
-| Premium / Discount | `mapMarketStructure`의 range; `lib/swing-range.ts`: `getRecentSwingRange`; `engine.analyze` | 확인된 고저점/중간값 → 구간. 서로 다른 range helper 사용 지점을 구분하여 PriceChart까지 추적 |
+| Premium / Discount | `mapMarketStructure`의 range; `lib/swing-range.ts`: `getRecentSwingRange`; `engine.analyze` | 확인된 고저점/중간값 → 구간. 실제 PriceChart는 analysis.confirmedRange / mapMarketStructure.range 사용. getRecentSwingRange는 테스트 외 실행 호출 확인되지 않음 |
 | Supply / Demand, OB/FVG | `lib/engine.ts`: 비공개 `detectZones`; `lib/auto-paper.ts`: `qualifiedZone`, `gradeZone` | OHLCV → 차트 StructureZone[] 또는 거래용 Zone/target/direction. 차트 휴리스틱과 실행용 구역 선정은 동일 함수가 아님 |
 | Equal High/Low, Liquidity | `lib/engine.ts`: 비공개 `detectLiquidity` | 최근 pivot/ATR/봉 → LiquidityLevel[]. ATR 허용 오차 군집이며 정확히 같은 가격만을 뜻하지 않음. analyze → PriceChart |
 | Sweep | `detectLiquidity` | 레벨 이후 wick 돌파와 종가 복귀로 SWEPT/BROKEN/UNTOUCHED 구분. 실제 주문 유동성을 관측한 결과가 아님 |
@@ -91,3 +91,7 @@ Node >=22.13.0에서 `npm ci`, `npm test`, `npx tsc --noEmit`, `npm run build`�
 ## Audit Coverage and Remaining Evidence
 
 시장 구조/BOS/CHoCH/P&D/구역/수평 유동성/sweep/MTF/시장단계는 구현 경로와 테스트를 추적할 수 있다. Type1/2, 전용 trendline/range liquidity, inducement는 독립 구현을 찾지 못한 항목이다. 원본 강의 영상/화면별 정답 라벨과 운영 당시 비식별 시세·결정 데이터는 이 저장소에 없다. 따라서 **코드 감사에는 사용할 수 있으나 강의 전체 충실도 인증을 이 저장소만으로 완료할 수는 없다**.
+
+## Audit Baseline 준비
+
+기능별 구현 상태와 실제 호출 흐름은 [AUDIT_MAP.md](AUDIT_MAP.md), 새 설치·lint를 포함한 검증 결과는 [AUDIT_VALIDATION.md](AUDIT_VALIDATION.md)를 참조한다. lint는 기존 소스의 22개 error 진단으로 실패했으며 이를 수정하지 않았다. `audit-baseline`은 감사 문서까지 포함한 최초 기준점으로 고정하고 이후 변경과 비교한다. 공급/수요, 유동성, Equal High/Low, Sweep, Minor 판정은 부분 구현으로 분류하며 Type1/2·Trendline/Range Liquidity·Inducement는 전용 계산 경로가 확인되지 않았다.
