@@ -42,3 +42,18 @@ next-env.d.ts
 /.tools/
 
 .npm-cache/
+
+# Audit export: local operational material
+build/
+.cache/
+*.log
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.tar.gz
+*.zip
+.vscode/
+.idea/
