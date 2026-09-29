@@ -62,7 +62,7 @@ The parallel engines must satisfy strict close/wick distinction, confirmed-only 
 
 ## Verification appendix (2026-09-28)
 
-- Baseline: 120 existing tests. Final: 148 passed, 0 failed (28 added, including fixture contract).
+- Baseline: 120 existing tests. Original stage: 148 passed, 0 failed (28 added, including fixture contract). Current externally reviewed engine HEAD: `208cfb37290f263ba06e129d8b96e5bd20fc3846`; 151 passed, 0 failed (31 added), TypeScript/build PASS, existing lint 22 / new 0. The metadata follow-up added 3 tests without changing structural predicates.
 - Stages: fixture 121; Swing 128; Internal 139; historical/MTF 146; final hardening 148. Each stage passed full tests, installed TypeScript `tsc --noEmit` and `npm run build` before its commit/next stage.
 - Final lint: baseline 22 errors, final 22, new error diagnostics 0; compared sorted file/rule/message records, not only counts. Existing errors not fixed.
 - Synthetic differential: 8 bars, 2 bars with differing Swing/Internal direction; detailed events available via `node --experimental-strip-types scripts/falcon-compare.mjs`.
