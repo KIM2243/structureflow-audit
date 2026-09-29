@@ -57,3 +57,7 @@ build/
 *.zip
 .vscode/
 .idea/
+
+# Local licensed market inputs and generated audit records
+/data/falcon-validation/
+/artifacts/
